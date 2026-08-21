@@ -12,10 +12,10 @@ import os
 from contextlib import suppress
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "test", "production"]
 
@@ -83,7 +83,10 @@ class Settings(BaseSettings):
 
     # -- seguridad ----------------------------------------------------------
     api_token: SecretStr | None = None
-    allowed_origins: list[str] = Field(
+    # NoDecode: sin esto, pydantic-settings intenta parsear el valor del
+    # entorno como JSON antes de que el validador de abajo vea la lista
+    # separada por comas documentada en .env.example, y siempre falla.
+    allowed_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
             "http://127.0.0.1:8000",
             "http://localhost:8000",
