@@ -16,6 +16,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
+import os
+
 from .. import __version__
 from ..core import netguard
 from ..core.errors import Aw1Error, ValidationError
@@ -28,7 +30,17 @@ from .security import check_origin, check_rate, check_token
 logger = logging.getLogger(__name__)
 
 # El frontend compilado. Si no existe, la API funciona igual y se avisa.
-WEB_DIST = Path(__file__).resolve().parents[3].parent / "frontend" / "dist"
+# La heuristica de parents() asume una instalacion editable (`pip install -e`,
+# como en desarrollo local): sube desde este archivo hasta la raiz del repo y
+# busca frontend/dist ahi. Con una instalacion real (wheel, como en Docker) el
+# paquete se copia sin conservar esa estructura, asi que AW1_WEB_DIST permite
+# fijar la ruta explicitamente.
+_web_dist_override = os.environ.get("AW1_WEB_DIST", "")
+WEB_DIST = (
+    Path(_web_dist_override)
+    if _web_dist_override
+    else Path(__file__).resolve().parents[3].parent / "frontend" / "dist"
+)
 PUBLIC_PATHS = frozenset({"/healthz", "/api/status", "/docs", "/openapi.json"})
 
 
