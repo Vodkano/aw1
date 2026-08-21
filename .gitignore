@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+data/
+*.sqlite3
+*.sqlite3-*
+node_modules/
+frontend/dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+dist/
+build/
+.DS_Store
+
+# build info de TypeScript
+*.tsbuildinfo
+.claude/

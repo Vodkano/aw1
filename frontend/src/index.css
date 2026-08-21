@@ -1,0 +1,256 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Sistema visual de AW1.
+   Minimalista: un solo acento, mucho espacio en blanco, bordes de 1 px y
+   tipografia del sistema. La paleta se define una vez aqui y todo lo demas la
+   consume, para que claro y oscuro se mantengan coherentes.
+   --------------------------------------------------------------------------- */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter var", Inter, ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  --color-ink-50: #f7f8f8;
+  --color-ink-100: #eceef0;
+  --color-ink-200: #d9dde1;
+  --color-ink-300: #b6bdc5;
+  --color-ink-400: #8b95a1;
+  --color-ink-500: #6b7683;
+  --color-ink-600: #545d69;
+  --color-ink-700: #444b55;
+  --color-ink-800: #2b3038;
+  --color-ink-900: #1a1e24;
+  --color-ink-950: #101317;
+
+  --color-accent-50: #eefbf7;
+  --color-accent-100: #d5f5ec;
+  --color-accent-300: #7ddcc4;
+  --color-accent-500: #14a37f;
+  --color-accent-600: #0d8467;
+  --color-accent-700: #0c6a54;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+}
+
+@layer base {
+  :root {
+    --surface: var(--color-white);
+    --surface-soft: var(--color-ink-50);
+    --surface-raised: var(--color-white);
+    --line: var(--color-ink-200);
+    --text: var(--color-ink-900);
+    --text-soft: var(--color-ink-500);
+  }
+
+  .dark {
+    --surface: var(--color-ink-950);
+    --surface-soft: #15181d;
+    --surface-raised: var(--color-ink-900);
+    --line: #272c33;
+    --text: var(--color-ink-100);
+    --text-soft: var(--color-ink-400);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  ::selection {
+    background: var(--color-accent-100);
+    color: var(--color-accent-700);
+  }
+
+  .dark ::selection {
+    background: var(--color-accent-700);
+    color: var(--color-accent-50);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent-500);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .surface {
+    background: var(--surface);
+  }
+  .surface-soft {
+    background: var(--surface-soft);
+  }
+  .surface-raised {
+    background: var(--surface-raised);
+  }
+  .hairline {
+    border-color: var(--line);
+  }
+  .muted {
+    color: var(--text-soft);
+  }
+
+  .card {
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--radius-md);
+    font-weight: 550;
+    transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease,
+      opacity 0.14s ease;
+    white-space: nowrap;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background: var(--color-accent-600);
+    color: white;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-accent-700);
+  }
+
+  .btn-ghost {
+    border: 1px solid var(--line);
+    color: var(--text-soft);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-soft);
+  }
+
+  .input {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 0.65rem 0.9rem;
+    color: var(--text);
+    transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  }
+  .input::placeholder {
+    color: var(--color-ink-400);
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-accent-500);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent-500) 16%, transparent);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.18rem 0.6rem;
+    font-size: 11px;
+    color: var(--text-soft);
+    white-space: nowrap;
+  }
+
+  .prose-chat p {
+    margin: 0 0 0.7em;
+  }
+  .prose-chat p:last-child {
+    margin-bottom: 0;
+  }
+  .prose-chat pre {
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 0.85rem 1rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0.7em 0;
+  }
+  .prose-chat code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+  .prose-chat :not(pre) > code {
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+}
+
+@keyframes aw1-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes aw1-pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.animate-in-soft {
+  animation: aw1-fade-up 0.18s ease-out both;
+}
+.animate-pulse-soft {
+  animation: aw1-pulse-soft 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

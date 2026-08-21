@@ -1,0 +1,44 @@
+# AW1 junto a Ollama.
+#
+#   docker compose up -d --build
+#   docker compose exec ollama ollama pull mistral
+#
+# El puerto se publica solo en 127.0.0.1 a proposito: exponerlo a internet
+# exige HTTPS por delante y AW1_API_TOKEN definido.
+services:
+  aw1:
+    build: .
+    image: aw1:3.0.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      AW1_ENV: ${AW1_ENV:-development}
+      AW1_OLLAMA_HOST: http://ollama:11434
+      AW1_OLLAMA_MODEL: ${AW1_OLLAMA_MODEL:-mistral}
+      AW1_OLLAMA_FAST_MODEL: ${AW1_OLLAMA_FAST_MODEL:-}
+      AW1_API_TOKEN: ${AW1_API_TOKEN:-}
+      AW1_OPENAI_API_KEY: ${AW1_OPENAI_API_KEY:-}
+      AW1_ALLOWED_ORIGINS: ${AW1_ALLOWED_ORIGINS:-http://127.0.0.1:8000,http://localhost:8000}
+      AW1_BROWSER_MAX_CONTEXTS: ${AW1_BROWSER_MAX_CONTEXTS:-3}
+    volumes:
+      - aw1-data:/data
+    # Chromium necesita mas memoria compartida que la que da Docker por defecto.
+    shm_size: "1gb"
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    # Para GPU NVIDIA, descomenta:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+
+volumes:
+  aw1-data:
+  ollama-models:
