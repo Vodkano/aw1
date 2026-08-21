@@ -47,6 +47,6 @@ EXPOSE 8000
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import os,urllib.request,sys; port=os.environ.get('PORT') or os.environ.get('AW1_PORT') or '8000'; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=3).status==200 else 1)"
+  CMD /opt/venv/bin/python -c "import os,urllib.request,sys; port=os.environ.get('PORT') or os.environ.get('AW1_PORT') or '8000'; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=3).status==200 else 1)"
 
-CMD ["python", "-m", "aw1"]
+CMD ["/opt/venv/bin/python", "-m", "aw1"]
