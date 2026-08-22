@@ -81,7 +81,11 @@ export default function App() {
   const [view, setView] = useState<ViewKey>(fromHash);
   const [status, setStatus] = useState<Status | null>(null);
   const [priceQuery, setPriceQuery] = useState<string>();
-  const [hasToken, setHasToken] = useState(() => !!getToken());
+  // null = todavia no se sabe (esperando /api/status o la verificacion del
+  // token). No alcanza con mirar si HAY algo guardado: un token viejo o mal
+  // pegado de una sesion anterior tiene que detectarse aca, no dejar pasar
+  // a la persona para que despues cada mensaje del chat le falle con un 401.
+  const [tokenValid, setTokenValid] = useState<boolean | null>(null);
 
   const refresh = useCallback(() => {
     api.status().then(setStatus).catch(() => setStatus(null));
@@ -92,6 +96,25 @@ export default function App() {
     const id = window.setInterval(refresh, 20_000);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!status) return;
+    if (!status.auth_enabled) {
+      setTokenValid(true);
+      return;
+    }
+    if (!getToken()) {
+      setTokenValid(false);
+      return;
+    }
+    api
+      .conversations()
+      .then(() => setTokenValid(true))
+      .catch(() => {
+        setToken("");
+        setTokenValid(false);
+      });
+  }, [status]);
 
   useEffect(() => {
     const handler = () => setView(fromHash());
@@ -114,12 +137,13 @@ export default function App() {
   );
 
   // /#admin tiene su propia password, separada de este token -no la bloquea.
-  const needsAuth = view !== "admin" && !!status?.auth_enabled && !hasToken;
+  const needsAuth = view !== "admin" && tokenValid === false;
+  const checking = view !== "admin" && tokenValid === null;
 
   return (
     <Shell view={view} onView={go} status={status}>
-      {needsAuth ? (
-        <AuthGate onUnlock={() => setHasToken(true)} />
+      {checking ? null : needsAuth ? (
+        <AuthGate onUnlock={() => setTokenValid(true)} />
       ) : (
         <>
           {view === "chat" && <ChatView status={status} onSearchPrices={searchPrices} />}
