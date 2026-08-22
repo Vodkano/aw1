@@ -8,9 +8,9 @@ from pydantic import ValidationError as PydanticError
 from aw1.settings import Settings
 
 
-def test_production_requires_a_long_token():
-    with pytest.raises(PydanticError, match="AW1_API_TOKEN"):
-        Settings(_env_file=None, env="production")
+def test_production_token_is_optional_but_must_be_valid_if_set():
+    # Sin token: el chat y el comparador de precios son de uso libre por diseno.
+    assert not Settings(_env_file=None, env="production").auth_enabled
     with pytest.raises(PydanticError, match="AW1_API_TOKEN"):
         Settings(_env_file=None, env="production", api_token="corto")
     assert Settings(_env_file=None, env="production", api_token="x" * 32).auth_enabled

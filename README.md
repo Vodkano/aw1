@@ -200,7 +200,7 @@ cambia el comportamiento:
 | `AW1_SEARCH_BUDGET_SECONDS` | `90` | Tope duro de una búsqueda completa |
 | `AW1_STORES_PER_SEARCH` | `5` | Menos tiendas, resultado más rápido |
 | `AW1_FX_RATES_TO_CLP` | tabla | Conversión para comparar monedas distintas |
-| `AW1_API_TOKEN` | vacío | Activa autenticación. Obligatorio en producción |
+| `AW1_API_TOKEN` | vacío | Activa autenticación. Opcional incluso en producción: el chat y el comparador de precios son de uso libre por diseño; si se define, protege el resto de la API |
 
 ### Rendimiento en un MacBook Air
 
@@ -219,8 +219,9 @@ AW1_STORES_PER_SEARCH=3
 
 `docker-compose.yml` publica el puerto solo en `127.0.0.1` a propósito.
 
-1. `AW1_ENV=production` y `AW1_API_TOKEN` largo y aleatorio. La configuración se
-   niega a arrancar en producción sin él.
+1. `AW1_ENV=production`. `AW1_API_TOKEN` es opcional: el chat y el comparador
+   de precios funcionan sin él por diseño (para eso está pensada la app). Si
+   lo defines, debe tener al menos 24 caracteres y solo protege `/api/memory`.
 2. HTTPS por delante (Caddy, Traefik o el proxy de tu proveedor).
 3. `AW1_ALLOWED_ORIGINS` con tu dominio real.
 4. Volumen persistente para `/data` y copias del SQLite.

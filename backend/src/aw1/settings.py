@@ -168,12 +168,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _production_rules(self) -> Settings:
         if self.env == "production":
-            token = self.api_token.get_secret_value() if self.api_token else ""
-            if len(token.strip()) < 24:
-                raise ValueError(
-                    "En produccion AW1_API_TOKEN es obligatorio y debe tener al menos "
-                    "24 caracteres. La consola no puede publicarse sin autenticacion."
-                )
+            # AW1_API_TOKEN es opcional: el chat y el comparador de precios son
+            # de uso libre por diseno (no dependen de una clave). Si se define
+            # igual se exige un largo minimo, para que no quede una clave debil
+            # protegiendo /api/admin/api-keys u otro uso futuro.
+            token = self.api_token.get_secret_value().strip() if self.api_token else ""
+            if token and len(token) < 24:
+                raise ValueError("AW1_API_TOKEN debe tener al menos 24 caracteres si se define.")
             if self.allow_private_hosts:
                 raise ValueError("AW1_ALLOW_PRIVATE_HOSTS no puede activarse en produccion.")
         if self.llm_provider == "groq":

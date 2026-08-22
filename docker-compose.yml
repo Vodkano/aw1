@@ -4,7 +4,9 @@
 #   docker compose exec ollama ollama pull mistral
 #
 # El puerto se publica solo en 127.0.0.1 a proposito: exponerlo a internet
-# exige HTTPS por delante y AW1_API_TOKEN definido.
+# exige HTTPS por delante. AW1_API_TOKEN es opcional -el chat y el comparador
+# de precios son de uso libre por diseno- y solo protege /api/memory si se
+# define.
 services:
   aw1:
     build: .
