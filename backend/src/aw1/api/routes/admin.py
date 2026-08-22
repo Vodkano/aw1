@@ -10,6 +10,7 @@ desprotegida por un descuido al copiar/pegar.
 
 from __future__ import annotations
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 
 from ...core import llm_provider
@@ -22,6 +23,7 @@ from ..schemas import (
     ApiKeySummary,
     CreateApiKeyRequest,
     SetSecretRequest,
+    TestSecretResult,
 )
 from ..security import check_admin
 
@@ -73,6 +75,37 @@ def _config_snapshot(box: Container) -> AdminConfig:
 @router.get("/config", response_model=AdminConfig)
 async def get_config(box: Container = Depends(container)) -> AdminConfig:
     return _config_snapshot(box)
+
+
+async def _test_provider_key(value: str, base_url: str) -> TestSecretResult:
+    """Groq y OpenAI comparten protocolo (GET /models con Bearer): alcanza
+    una funcion para las dos. No gasta tokens, solo confirma que la clave
+    es valida -pensado para no repetir el error de guardar por error un
+    valor que no es la clave (paso una password de otro campo, por ejemplo)."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{base_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {value}"},
+            )
+    except httpx.HTTPError:
+        return TestSecretResult(ok=False, detail="No se pudo contactar al proveedor.")
+    if response.status_code == 200:
+        return TestSecretResult(ok=True, detail="Clave valida.")
+    if response.status_code in (401, 403):
+        return TestSecretResult(ok=False, detail="El proveedor rechazo la clave.")
+    return TestSecretResult(ok=False, detail=f"El proveedor respondio {response.status_code}.")
+
+
+@router.post("/config/{name}/test", response_model=TestSecretResult)
+async def test_config(
+    name: str, payload: SetSecretRequest, box: Container = Depends(container)
+) -> TestSecretResult:
+    if name == "openai_api_key":
+        return await _test_provider_key(payload.value, box.settings.openai_base_url)
+    if name == "groq_api_key":
+        return await _test_provider_key(payload.value, box.settings.groq_base_url)
+    raise ValidationError(f"Esta clave no se puede probar: {name}")
 
 
 @router.put("/config/{name}", response_model=AdminConfig)

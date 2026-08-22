@@ -73,6 +73,11 @@ class AdminConfig(BaseModel):
     openai_configured: bool
 
 
+class TestSecretResult(BaseModel):
+    ok: bool
+    detail: str
+
+
 class CreateApiKeyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

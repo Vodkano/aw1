@@ -242,6 +242,11 @@ export const admin = {
       method: "PUT",
       body: JSON.stringify({ value }),
     }),
+  testSecret: (name: string, value: string) =>
+    adminRequest<{ ok: boolean; detail: string }>(
+      `/api/admin/config/${encodeURIComponent(name)}/test`,
+      { method: "POST", body: JSON.stringify({ value }) },
+    ),
   deleteSecret: (name: string) =>
     adminRequest<AdminConfig>(`/api/admin/config/${encodeURIComponent(name)}`, {
       method: "DELETE",

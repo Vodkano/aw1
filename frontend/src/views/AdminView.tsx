@@ -67,16 +67,22 @@ function Field({
   configured,
   onSave,
   onClear,
+  onTest,
 }: {
   label: string;
   hint: string;
   configured: boolean;
   onSave: (value: string) => Promise<void>;
   onClear: () => Promise<void>;
+  /** Si viene, se prueba la clave contra el proveedor antes de guardarla -asi
+   * un valor pegado por error (ej. otra password) no queda guardado en
+   * silencio hasta que falla horas despues, a mitad de un chat. */
+  onTest?: (value: string) => Promise<{ ok: boolean; detail: string }>;
 }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [testError, setTestError] = useState("");
 
   return (
     <div className="border-b hairline py-3.5 last:border-b-0">
@@ -128,8 +134,17 @@ function Field({
           disabled={busy || !value.trim()}
           onClick={async () => {
             setBusy(true);
+            setTestError("");
+            const clean = value.trim();
             try {
-              await onSave(value.trim());
+              if (onTest) {
+                const result = await onTest(clean);
+                if (!result.ok) {
+                  setTestError(result.detail);
+                  return;
+                }
+              }
+              await onSave(clean);
               setValue("");
               setSaved(true);
               setTimeout(() => setSaved(false), 1600);
@@ -138,9 +153,10 @@ function Field({
             }
           }}
         >
-          {saved ? "Guardado" : "Guardar"}
+          {busy ? "Probando..." : saved ? "Guardado" : onTest ? "Probar y guardar" : "Guardar"}
         </button>
       </div>
+      {testError && <p className="mt-1.5 text-[12px] text-red-500">{testError}</p>}
     </div>
   );
 }
@@ -429,6 +445,7 @@ export function AdminView() {
               configured={!!config?.groq_configured}
               onSave={async (value) => setConfig(await admin.setSecret("groq_api_key", value))}
               onClear={async () => setConfig(await admin.deleteSecret("groq_api_key"))}
+              onTest={(value) => admin.testSecret("groq_api_key", value)}
             />
           )}
         </section>
@@ -446,6 +463,7 @@ export function AdminView() {
             configured={!!config?.openai_configured}
             onSave={async (value) => setConfig(await admin.setSecret("openai_api_key", value))}
             onClear={async () => setConfig(await admin.deleteSecret("openai_api_key"))}
+            onTest={(value) => admin.testSecret("openai_api_key", value)}
           />
         </section>
 
