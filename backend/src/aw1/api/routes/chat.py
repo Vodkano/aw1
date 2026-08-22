@@ -24,7 +24,6 @@ async def chat(
             async for event in box.chat.stream(
                 payload.message,
                 conversation_id=payload.conversation_id,
-                allow_gpt=payload.allow_gpt,
             ):
                 if await request.is_disconnected():
                     break

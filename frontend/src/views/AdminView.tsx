@@ -2,7 +2,64 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { Copy, KeyRound, Lock, Trash2 } from "lucide-react";
 import { admin, ApiError, getAdminPassword, setAdminPassword } from "../lib/api";
-import type { AdminConfig, ApiKeyCreated, ApiKeySummary } from "../types";
+import type { AdminConfig, AdminStatus, ApiKeyCreated, ApiKeySummary } from "../types";
+
+function StatusRow({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b hairline py-2 last:border-b-0 text-[13px]">
+      <span className="muted">{label}</span>
+      <span className="flex items-center gap-2 font-medium">
+        {ok !== undefined && (
+          <span className={clsx("size-1.5 rounded-full", ok ? "bg-accent-500" : "bg-ink-400")} />
+        )}
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function StatusCard() {
+  const [status, setStatus] = useState<AdminStatus | null>(null);
+
+  useEffect(() => {
+    admin.status().then(setStatus).catch(() => setStatus(null));
+  }, []);
+
+  return (
+    <section className="card mt-7 p-5">
+      <h2 className="text-[15px] font-semibold">Estado</h2>
+      <p className="mt-1 text-[13px] muted">IA, memoria y accesos, todo junto.</p>
+      <div className="mt-3">
+        <StatusRow
+          label="Proveedor / modelo"
+          value={status ? `${status.llm_provider} · ${status.llm_model}` : "—"}
+        />
+        <StatusRow
+          label="Base de datos"
+          value={status?.database ?? "—"}
+          ok={status?.database === "online"}
+        />
+        <StatusRow
+          label="Token general (AW1_API_TOKEN)"
+          value={status?.api_token_configured ? "configurado" : "sin configurar"}
+          ok={status?.api_token_configured}
+        />
+        <StatusRow
+          label="Claves de API emitidas"
+          value={status ? String(status.api_keys_issued) : "—"}
+        />
+        <StatusRow
+          label="Memoria"
+          value={
+            status
+              ? `${status.conversations} conversaciones · ${status.messages} mensajes · ${status.saved_items} guardados`
+              : "—"
+          }
+        />
+      </div>
+    </section>
+  );
+}
 
 function Field({
   label,
@@ -333,7 +390,9 @@ export function AdminView() {
           Claves de proveedores y accesos. Los cambios aplican al instante, sin reiniciar.
         </p>
 
-        <section className="card mt-7 p-5">
+        <StatusCard />
+
+        <section className="card mt-4 p-5">
           <h2 className="text-[15px] font-semibold">Proveedor del LLM</h2>
           <p className="mt-1 text-[13px] muted">
             Cual usa el chat y el comparador de precios ahora mismo.

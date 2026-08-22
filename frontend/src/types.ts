@@ -112,3 +112,14 @@ export interface ApiKeySummary {
 export interface ApiKeyCreated extends ApiKeySummary {
   value: string;
 }
+
+export interface AdminStatus {
+  llm_provider: string;
+  llm_model: string;
+  database: string;
+  api_token_configured: boolean;
+  api_keys_issued: number;
+  conversations: number;
+  messages: number;
+  saved_items: number;
+}

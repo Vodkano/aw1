@@ -201,6 +201,7 @@ decides quien deberia responder. Responde SOLO con este objeto JSON:
 {
   "intent": "charla | biografia | codigo | actualidad | precio | confuso",
   "needs_fresh_data": false,
+  "heavy": false,
   "person": "nombre propio si preguntan por una persona real, si no vacio",
   "search_terms": "terminos utiles para buscar, o vacio",
   "confidence": 0.8,
@@ -216,6 +217,13 @@ Guia:
 - "codigo": piden escribir, corregir o explicar codigo.
 - "confuso": el mensaje no se entiende o esta vacio de contenido.
 - "charla": todo lo demas.
+
+"heavy": marca true cuando la tarea se beneficia claramente de un modelo mas
+fuerte que el local -codigo no trivial, analisis largo, razonamiento en
+varios pasos, escritura extensa-. Marca false en saludos, charla casual,
+preguntas cortas y todo lo que un modelo chico responde bien. Si "heavy" es
+true y hay un modelo mas fuerte configurado, se usa automaticamente: no se
+le pregunta a la persona antes.
 Corrige mentalmente las faltas de ortografia antes de decidir.
 """
 

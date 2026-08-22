@@ -8,6 +8,7 @@
 
 import type {
   AdminConfig,
+  AdminStatus,
   ApiKeyCreated,
   ApiKeySummary,
   Comparison,
@@ -197,7 +198,7 @@ export const api = {
   status: () => request<Status>("/api/status"),
 
   chat: (
-    body: { message: string; conversation_id?: string | null; allow_gpt?: boolean },
+    body: { message: string; conversation_id?: string | null },
     handlers: StreamHandlers,
   ) => streamSSE("/api/chat", body, handlers),
 
@@ -234,6 +235,7 @@ export const api = {
 };
 
 export const admin = {
+  status: () => adminRequest<AdminStatus>("/api/admin/status"),
   config: () => adminRequest<AdminConfig>("/api/admin/config"),
   setSecret: (name: string, value: string) =>
     adminRequest<AdminConfig>(`/api/admin/config/${encodeURIComponent(name)}`, {

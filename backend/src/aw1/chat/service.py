@@ -40,10 +40,6 @@ logger = logging.getLogger(__name__)
 
 MAX_MESSAGE = 4000
 
-GPT_QUESTION = (
-    "Esto depende de informacion actual que el modelo local no tiene. "
-    "Quieres que lo consulte con GPT?"
-)
 CLARIFY = (
     "No logre entender el mensaje. Puedes reformularlo? Por ejemplo: el nombre "
     "completo de la persona, el lenguaje de programacion, o el producto exacto."
@@ -101,7 +97,6 @@ class ChatService:
         message: str,
         *,
         conversation_id: str | None = None,
-        allow_gpt: bool = False,
     ) -> AsyncIterator[ChatEvent]:
         clean = " ".join(str(message or "").split())
         if not clean:
@@ -136,15 +131,22 @@ class ChatService:
             yield ChatEvent("action", {"kind": "search_prices", "query": product})
             return
 
-        if route.needs_fresh_data and not allow_gpt:
-            if self.gpt_configured():
-                yield ChatEvent("confirm", {"question": GPT_QUESTION, "message": clean})
-                return
-            # Sin clave no se ofrece nada: se responde en local y se avisa.
+        # -- tareas que se benefician de un modelo mas fuerte -------------
+        # Automatico: no se pide confirmacion. La interfaz deja claro despues
+        # de que modelo vino la respuesta (etiqueta "GPT" junto al mensaje).
+        wants_gpt = route.heavy or route.needs_fresh_data
+        if wants_gpt and self.gpt_configured():
+            async for event in self._answer_with_gpt(conversation, clean, history):
+                yield event
+            return
+        if wants_gpt and not self.gpt_configured():
             yield ChatEvent(
                 "notice",
                 {
-                    "text": "GPT no esta configurado, asi que respondo con el modelo local.",
+                    "text": (
+                        "Esto se beneficiaria de GPT, pero no esta configurado; "
+                        "respondo con el modelo local."
+                    ),
                 },
             )
 
@@ -163,12 +165,6 @@ class ChatService:
                     f"<<<DATOS>>>\n{extract}\n{url}\n<<<FIN>>>"
                 )
                 yield ChatEvent("source", {"url": url, "kind": "wikipedia"})
-
-        # -- respuesta en streaming --------------------------------------
-        if allow_gpt and route.needs_fresh_data and self.gpt_configured():
-            async for event in self._answer_with_gpt(conversation, clean, history):
-                yield event
-            return
 
         async for event in self._answer_with_ollama(
             conversation, clean, history, context_block, sources

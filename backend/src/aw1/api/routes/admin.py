@@ -13,6 +13,7 @@ from ...core.errors import NotFoundError, ValidationError
 from ..deps import Container, container
 from ..schemas import (
     AdminConfig,
+    AdminStatus,
     ApiKeyCreated,
     ApiKeySummary,
     CreateApiKeyRequest,
@@ -27,6 +28,25 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 ALLOWED_SECRETS = frozenset(
     {"openai_api_key", "groq_api_key", "ollama_host", "llm_provider"}
 )
+
+
+@router.get("/status", response_model=AdminStatus)
+async def get_status(request: Request, box: Container = Depends(container)) -> AdminStatus:
+    check_admin(request, box.settings)
+    provider = box.secrets.get("llm_provider") or box.settings.llm_provider
+    model = box.settings.groq_model if provider == "groq" else box.settings.ollama_model
+    conversations = await box.repo.conversations(limit=10_000)
+    api_keys = await box.api_keys.list()
+    return AdminStatus(
+        llm_provider=provider,
+        llm_model=model,
+        database="online" if await box.repo.healthy() else "offline",
+        api_token_configured=box.settings.auth_enabled,
+        api_keys_issued=len(api_keys),
+        conversations=len(conversations),
+        messages=sum(row["messages"] for row in conversations),
+        saved_items=await box.repo.count_items(),
+    )
 
 
 @router.get("/config", response_model=AdminConfig)

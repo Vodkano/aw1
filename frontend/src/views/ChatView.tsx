@@ -34,7 +34,6 @@ export function ChatView({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState<{ question: string; message: string } | null>(null);
   const [conversation, setConversation] = useState<string>(() => {
     try {
       return sessionStorage.getItem(CONVERSATION_KEY) ?? "";
@@ -49,7 +48,7 @@ export function ChatView({
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [messages, confirm]);
+  }, [messages]);
 
   const remember = useCallback((id: string) => {
     setConversation(id);
@@ -62,18 +61,15 @@ export function ChatView({
   }, []);
 
   const send = useCallback(
-    async (text: string, allowGpt = false, echo = true) => {
+    async (text: string) => {
       const controller = new AbortController();
       abort.current = controller;
       setBusy(true);
-      setConfirm(null);
 
       const assistantId = newId();
       setMessages((current) => [
         ...current,
-        ...(echo
-          ? [{ id: newId(), role: "user" as const, content: text }]
-          : []),
+        { id: newId(), role: "user" as const, content: text },
         { id: assistantId, role: "assistant" as const, content: "", streaming: true },
       ]);
 
@@ -84,7 +80,7 @@ export function ChatView({
 
       try {
         await api.chat(
-          { message: text, conversation_id: conversation || null, allow_gpt: allowGpt },
+          { message: text, conversation_id: conversation || null },
           {
             signal: controller.signal,
             onEvent: (type, data) => {
@@ -109,10 +105,6 @@ export function ChatView({
                         : item,
                     ),
                   );
-                  break;
-                case "confirm":
-                  setMessages((current) => current.filter((item) => item.id !== assistantId));
-                  setConfirm({ question: data.question, message: data.message });
                   break;
                 case "action":
                   if (data.kind === "search_prices") {
@@ -174,10 +166,9 @@ export function ChatView({
     if (conversation) await api.deleteConversation(conversation).catch(() => undefined);
     remember("");
     setMessages([]);
-    setConfirm(null);
   };
 
-  const empty = messages.length === 0 && !confirm;
+  const empty = messages.length === 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -189,8 +180,9 @@ export function ChatView({
                 En que te ayudo?
               </h1>
               <p className="mt-2 max-w-lg text-[14.5px] muted">
-                Todo corre en tu computador con Ollama. Para precios uso un navegador
-                real que entra a cada tienda y lee la ficha del producto.
+                Charla simple va con Ollama. Codigo, analisis o tareas pesadas pasan a
+                GPT solo si esta configurado -la etiqueta bajo cada respuesta dice cual
+                se uso. Para precios uso un navegador real que entra a cada tienda.
               </p>
               <div className="mt-7 flex flex-wrap gap-2">
                 {SUGGESTIONS.map((item) => (
@@ -210,39 +202,6 @@ export function ChatView({
               {messages.map((message) => (
                 <Bubble key={message.id} message={message} />
               ))}
-
-              {confirm && (
-                <div className="card animate-in-soft p-4">
-                  <p className="text-[14px]">{confirm.question}</p>
-                  <div className="mt-3.5 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="btn btn-primary px-3.5 py-1.5 text-[13px]"
-                      onClick={() => void send(confirm.message, true, false)}
-                    >
-                      Si, consultar GPT
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost px-3.5 py-1.5 text-[13px]"
-                      onClick={() => {
-                        setConfirm(null);
-                        setMessages((current) => [
-                          ...current,
-                          {
-                            id: newId(),
-                            role: "assistant",
-                            content: "De acuerdo, no se consulto ningun servicio externo.",
-                            source: "system",
-                          },
-                        ]);
-                      }}
-                    >
-                      No, mantener local
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>

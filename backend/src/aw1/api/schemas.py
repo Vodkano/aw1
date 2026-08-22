@@ -13,7 +13,6 @@ class ChatRequest(BaseModel):
 
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, max_length=64)
-    allow_gpt: bool = False
 
 
 class PriceRequest(BaseModel):
@@ -89,6 +88,17 @@ class ApiKeySummary(BaseModel):
 
 class ApiKeyCreated(ApiKeySummary):
     value: str
+
+
+class AdminStatus(BaseModel):
+    llm_provider: str
+    llm_model: str
+    database: str
+    api_token_configured: bool
+    api_keys_issued: int
+    conversations: int
+    messages: int
+    saved_items: int
 
 
 class StatusResponse(BaseModel):

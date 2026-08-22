@@ -113,6 +113,10 @@ class ChatRoute(BaseModel):
 
     intent: str = "charla"
     needs_fresh_data: bool = False
+    # Tarea que se beneficia de un modelo mas fuerte (codigo, analisis largo,
+    # razonamiento complejo): se responde con GPT automaticamente si esta
+    # configurado, sin pedir confirmacion. Charla simple se queda en Ollama.
+    heavy: bool = False
     person: str = ""
     search_terms: str = ""
     confidence: float = 0.5

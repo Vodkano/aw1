@@ -87,7 +87,7 @@ def route(message: str) -> ChatRoute:
             confidence=0.75 if person else 0.5, reason="Pregunta por una persona.",
         )
     if any(re.search(pattern, canon) for pattern in _CODE):
-        return ChatRoute(intent="codigo", confidence=0.65, reason="Peticion tecnica.")
+        return ChatRoute(intent="codigo", heavy=True, confidence=0.65, reason="Peticion tecnica.")
     if any(re.search(pattern, canon) for pattern in _FRESH):
         return ChatRoute(
             intent="actualidad", needs_fresh_data=True, search_terms=canon,
