@@ -4,10 +4,12 @@ import { ChatView } from "./views/ChatView";
 import { PricesView } from "./views/PricesView";
 import { MemoryView } from "./views/MemoryView";
 import { SettingsView } from "./views/SettingsView";
+import { AdminView } from "./views/AdminView";
 import { api } from "./lib/api";
 import type { Status } from "./types";
 
-const VALID: ViewKey[] = ["chat", "prices", "memory", "settings"];
+// "admin" no esta en NAV (Shell.tsx): solo se llega escribiendo #admin.
+const VALID: ViewKey[] = ["chat", "prices", "memory", "settings", "admin"];
 
 function fromHash(): ViewKey {
   const value = window.location.hash.replace("#", "") as ViewKey;
@@ -55,6 +57,7 @@ export default function App() {
       {view === "prices" && <PricesView initialQuery={priceQuery} />}
       {view === "memory" && <MemoryView />}
       {view === "settings" && <SettingsView status={status} onRefresh={refresh} />}
+      {view === "admin" && <AdminView />}
     </Shell>
   );
 }

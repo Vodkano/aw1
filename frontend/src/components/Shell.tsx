@@ -12,7 +12,8 @@ import {
 import type { Status } from "../types";
 import { useTheme } from "../lib/useTheme";
 
-export type ViewKey = "chat" | "prices" | "memory" | "settings";
+// "admin" no aparece en NAV a proposito: pagina privada, solo por URL (#admin).
+export type ViewKey = "chat" | "prices" | "memory" | "settings" | "admin";
 
 const NAV: { key: ViewKey; label: string; icon: typeof MessageSquare }[] = [
   { key: "chat", label: "Chat", icon: MessageSquare },

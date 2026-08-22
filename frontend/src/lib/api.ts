@@ -6,9 +6,18 @@
  * tardan y es mucho mejor mostrar el avance que un spinner.
  */
 
-import type { Comparison, SavedItem, Status, StoreInfo } from "../types";
+import type {
+  AdminConfig,
+  ApiKeyCreated,
+  ApiKeySummary,
+  Comparison,
+  SavedItem,
+  Status,
+  StoreInfo,
+} from "../types";
 
 const TOKEN_KEY = "aw1-token";
+const ADMIN_PASSWORD_KEY = "aw1-admin-password";
 
 export class ApiError extends Error {
   status: number;
@@ -38,12 +47,60 @@ export function setToken(value: string): void {
   }
 }
 
+export function getAdminPassword(): string {
+  try {
+    return localStorage.getItem(ADMIN_PASSWORD_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setAdminPassword(value: string): void {
+  try {
+    if (value) localStorage.setItem(ADMIN_PASSWORD_KEY, value);
+    else localStorage.removeItem(ADMIN_PASSWORD_KEY);
+  } catch {
+    /* sin almacenamiento: el password dura lo que la pestana */
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body) headers.set("Content-Type", "application/json");
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  let response: Response;
+  try {
+    response = await fetch(path, { ...init, headers });
+  } catch (error) {
+    if ((error as Error).name === "AbortError") throw error;
+    throw new ApiError("No hay conexion con el servidor de AW1.");
+  }
+
+  const isJson = (response.headers.get("content-type") ?? "").includes("application/json");
+  const payload = isJson ? await response.json().catch(() => ({})) : {};
+  if (!response.ok) {
+    throw new ApiError(
+      payload.error ?? `El servidor respondio ${response.status}.`,
+      response.status,
+      payload.request_id ?? response.headers.get("x-request-id") ?? "",
+    );
+  }
+  return payload as T;
+}
+
+/**
+ * El panel admin (/api/admin/*) no usa el token general: exige su propia
+ * password por separado, en la cabecera X-Admin-Password.
+ */
+async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "application/json");
+  if (init.body) headers.set("Content-Type", "application/json");
+  const password = getAdminPassword();
+  if (password) headers.set("X-Admin-Password", password);
 
   let response: Response;
   try {
@@ -174,4 +231,25 @@ export const api = {
     request<{ removed: Record<string, number> }>(`/api/memory?everything=${everything}`, {
       method: "DELETE",
     }),
+};
+
+export const admin = {
+  config: () => adminRequest<AdminConfig>("/api/admin/config"),
+  setSecret: (name: string, value: string) =>
+    adminRequest<AdminConfig>(`/api/admin/config/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    }),
+  deleteSecret: (name: string) =>
+    adminRequest<AdminConfig>(`/api/admin/config/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  apiKeys: () => adminRequest<ApiKeySummary[]>("/api/admin/api-keys"),
+  createApiKey: (label: string) =>
+    adminRequest<ApiKeyCreated>("/api/admin/api-keys", {
+      method: "POST",
+      body: JSON.stringify({ label }),
+    }),
+  deleteApiKey: (id: number) =>
+    adminRequest<void>(`/api/admin/api-keys/${id}`, { method: "DELETE" }),
 };

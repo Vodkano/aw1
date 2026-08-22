@@ -94,3 +94,21 @@ export interface StoreInfo {
   currency: string;
   notes: string;
 }
+
+export interface AdminConfig {
+  llm_provider: "ollama" | "groq";
+  ollama_host: string;
+  groq_configured: boolean;
+  openai_configured: boolean;
+}
+
+export interface ApiKeySummary {
+  id: number;
+  label: string;
+  key_preview: string;
+  created_at: string;
+}
+
+export interface ApiKeyCreated extends ApiKeySummary {
+  value: string;
+}
