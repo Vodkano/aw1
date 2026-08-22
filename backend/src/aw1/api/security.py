@@ -39,8 +39,12 @@ def check_origin(request: Request, settings: Settings) -> None:
 def check_token(
     request: Request, settings: Settings, extra: ApiKeyStore | None = None
 ) -> None:
-    has_extra_keys = extra is not None and bool(extra.configured)
-    if not settings.auth_enabled and not has_extra_keys:
+    # La exigencia de auth la prende solo AW1_API_TOKEN, nunca el mero hecho
+    # de haber emitido claves desde el panel admin: si dependiera de eso,
+    # crear una clave de API para un script externo bloquearia de golpe la
+    # interfaz web propia (nunca manda ningun token). Las claves del panel
+    # solo amplian QUIEN puede pasar cuando la auth ya esta activa.
+    if not settings.auth_enabled:
         return
     header = request.headers.get("authorization", "")
     scheme, _, value = header.partition(" ")
@@ -51,11 +55,10 @@ def check_token(
     if not presented:
         presented = str(request.query_params.get("token", "")).strip()
     if presented:
-        if settings.auth_enabled:
-            assert settings.api_token is not None
-            expected = settings.api_token.get_secret_value()
-            if hmac.compare_digest(presented, expected):
-                return
+        assert settings.api_token is not None  # implicado por auth_enabled
+        expected = settings.api_token.get_secret_value()
+        if hmac.compare_digest(presented, expected):
+            return
         if extra is not None and extra.verify(presented):
             return
     raise AuthError("Se requiere un token valido para usar esta API.")

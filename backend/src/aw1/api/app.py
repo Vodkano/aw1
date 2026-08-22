@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -29,18 +28,14 @@ from .security import check_origin, check_rate, check_token
 logger = logging.getLogger(__name__)
 
 # El frontend compilado. Si no existe, la API funciona igual y se avisa.
-# La heuristica de parents() asume una instalacion editable (`pip install -e`,
-# como en desarrollo local): sube desde este archivo hasta la raiz del repo y
-# busca frontend/dist ahi. Con una instalacion real (wheel, como en Docker) el
-# paquete se copia sin conservar esa estructura, asi que AW1_WEB_DIST permite
-# fijar la ruta explicitamente.
-_web_dist_override = os.environ.get("AW1_WEB_DIST", "")
-WEB_DIST = (
-    Path(_web_dist_override)
-    if _web_dist_override
-    else Path(__file__).resolve().parents[3].parent / "frontend" / "dist"
-)
 PUBLIC_PATHS = frozenset({"/healthz", "/api/status", "/docs", "/openapi.json"})
+
+
+def _resolve_web_dist(settings: Settings) -> Path:
+    """Ver Settings.web_dist: vacio infiere la ruta (instalacion editable)."""
+    if settings.web_dist:
+        return Path(settings.web_dist)
+    return Path(__file__).resolve().parents[3].parent / "frontend" / "dist"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -158,16 +153,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(memory.router)
     app.include_router(admin.router)
 
-    _mount_frontend(app)
+    _mount_frontend(app, _resolve_web_dist(settings))
     return app
 
 
-def _mount_frontend(app: FastAPI) -> None:
-    if not WEB_DIST.is_dir():
+def _mount_frontend(app: FastAPI, web_dist: Path) -> None:
+    if not web_dist.is_dir():
         logger.warning(
             "No hay frontend compilado en %s. Ejecuta `npm run build` en frontend/ "
             "o usa `npm run dev` en el puerto 5173.",
-            WEB_DIST,
+            web_dist,
         )
 
         @app.get("/", include_in_schema=False)
@@ -182,23 +177,23 @@ def _mount_frontend(app: FastAPI) -> None:
 
         return
 
-    assets = WEB_DIST / "assets"
+    assets = web_dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
-        return FileResponse(WEB_DIST / "index.html")
+        return FileResponse(web_dist / "index.html")
 
     @app.get("/{path:path}", include_in_schema=False)
     async def spa(path: str) -> Response:
         """Cualquier ruta desconocida devuelve la app: es una SPA."""
         if path.startswith(("api/", "assets/", "healthz", "docs", "openapi")):
             return JSONResponse({"error": "Recurso no encontrado."}, status_code=404)
-        candidate = (WEB_DIST / path).resolve()
-        if candidate.is_file() and candidate.is_relative_to(WEB_DIST.resolve()):
+        candidate = (web_dist / path).resolve()
+        if candidate.is_file() and candidate.is_relative_to(web_dist.resolve()):
             return FileResponse(candidate)
-        return FileResponse(WEB_DIST / "index.html")
+        return FileResponse(web_dist / "index.html")
 
 
 def _error(status: int, message: str, rid: str) -> JSONResponse:

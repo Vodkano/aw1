@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from fastapi import Request
@@ -58,9 +59,8 @@ class Container:
         await repo.connect()
 
         secrets = SecretsStore(repo)
-        await secrets.load()
         api_keys = ApiKeyStore(repo)
-        await api_keys.load()
+        await asyncio.gather(secrets.load(), api_keys.load())
 
         llm = _build_llm_client(settings, secrets)
         judges = Judges(

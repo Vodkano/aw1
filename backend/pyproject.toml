@@ -51,6 +51,10 @@ ignore = ["S101"]
 "src/aw1/api/routes/*" = ["B008"]
 "src/aw1/llm/*" = ["ASYNC109"]
 "src/aw1/core/http.py" = ["ASYNC109"]
+# Servir el SPA hace un par de llamadas de Path (resolve/is_file) sobre disco
+# local, no red: el costo de bloquear el loop es despreciable y no amerita
+# anyio.Path solo para esto.
+"src/aw1/api/app.py" = ["ASYNC240"]
 "tests/*" = ["S", "B011", "E501", "SIM117", "ASYNC109"]
 
 [tool.mypy]

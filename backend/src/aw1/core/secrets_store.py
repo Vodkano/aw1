@@ -39,6 +39,3 @@ class SecretsStore:
     async def delete(self, key: str) -> None:
         await self._repo.delete_secret(key)
         self._cache.pop(key, None)
-
-    def configured_keys(self) -> frozenset[str]:
-        return frozenset(self._cache.keys())

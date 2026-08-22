@@ -303,7 +303,7 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
   const submit = async () => {
     setBusy(true);
     setError("");
-    setAdminPassword(value);
+    setAdminPassword(value.trim());
     try {
       await admin.config();
       onUnlock();
@@ -436,7 +436,9 @@ export function AdminView() {
         <section className="card mt-4 p-5">
           <h2 className="text-[15px] font-semibold">GPT (OpenAI)</h2>
           <p className="mt-1 text-[13px] muted">
-            Modo externo del chat, solo se usa si lo confirmas en cada consulta.
+            Se usa automaticamente para codigo, analisis largo o actualidad -sin pedir
+            permiso cada vez. La etiqueta bajo cada respuesta del chat avisa cuando vino
+            de aqui.
           </p>
           <Field
             label="Clave de OpenAI"

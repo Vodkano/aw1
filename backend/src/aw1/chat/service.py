@@ -134,12 +134,17 @@ class ChatService:
         # -- tareas que se benefician de un modelo mas fuerte -------------
         # Automatico: no se pide confirmacion. La interfaz deja claro despues
         # de que modelo vino la respuesta (etiqueta "GPT" junto al mensaje).
-        wants_gpt = route.heavy or route.needs_fresh_data
-        if wants_gpt and self.gpt_configured():
-            async for event in self._answer_with_gpt(conversation, clean, history):
-                yield event
-            return
-        if wants_gpt and not self.gpt_configured():
+        # Biografia queda afuera a proposito: el modelo puede marcar una
+        # pregunta como biografia Y heavy/needs_fresh_data a la vez (ej.
+        # "quien es el actual presidente de Francia"), y en ese caso gana
+        # Wikipedia -es la garantia de cita de fuente, no queremos que GPT la
+        # salte silenciosamente.
+        wants_gpt = (route.heavy or route.needs_fresh_data) and route.intent != "biografia"
+        if wants_gpt:
+            if self.gpt_configured():
+                async for event in self._answer_with_gpt(conversation, clean, history):
+                    yield event
+                return
             yield ChatEvent(
                 "notice",
                 {
@@ -242,9 +247,9 @@ class ChatService:
                 {
                     "role": "system",
                     "content": (
-                        "Eres el modo externo de AW1. La persona autorizo esta consulta "
-                        "de forma explicita. Responde en espanol, breve y con datos "
-                        "verificables. Si no tienes certeza, dilo."
+                        "Eres el modo externo de AW1, usado para preguntas que se "
+                        "benefician de un modelo mas fuerte. Responde en espanol, breve "
+                        "y con datos verificables. Si no tienes certeza, dilo."
                     ),
                 },
                 *history,

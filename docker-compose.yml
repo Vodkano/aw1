@@ -30,8 +30,10 @@ services:
     # Chromium necesita mas memoria compartida que la que da Docker por defecto.
     shm_size: "1gb"
     depends_on:
-      - ollama
-      - postgres
+      ollama:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   ollama:
     image: ollama/ollama:latest
@@ -54,6 +56,11 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     # Solo la red interna de docker compose: nunca expuesto a internet.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aw1 -d aw1"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
 
 volumes:
   aw1-data:

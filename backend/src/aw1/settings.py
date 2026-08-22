@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = False
     data_dir: Path = Path("data")
+    # Ruta del frontend compilado. Vacio: se infiere subiendo desde este
+    # archivo hasta la raiz del repo -sirve para una instalacion editable
+    # (`pip install -e`, como en desarrollo local), pero no para una
+    # instalacion real (wheel, como en Docker), que no conserva esa
+    # estructura de carpetas. Ahi hace falta fijarla explicitamente.
+    web_dist: str = ""
     # Vacio: SQLite en data_dir/aw1.sqlite3 (por defecto, ideal para local).
     # postgres://... o postgresql://...: usa Postgres (recomendado en la nube).
     database_url: str = ""
