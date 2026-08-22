@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
 from .. import __version__
-from ..core import netguard
+from ..core import llm_provider, netguard
 from ..core.errors import Aw1Error, ValidationError
 from ..core.logging_setup import configure_logging, request_id
 from ..settings import Settings, get_settings
@@ -50,16 +50,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.container = await Container.build(settings)
+        box = await Container.build(settings)
+        app.state.container = box
         # El navegador tarda ~1 s en arrancar: se hace en segundo plano para no
         # bloquear el arranque del servidor.
-        app.state.browser_task = asyncio.create_task(app.state.container.browser.start())
+        app.state.browser_task = asyncio.create_task(box.browser.start())
         logger.info(
             "AW1 %s en %s | proveedor %s | modelo %s | auth %s",
             __version__,
             settings.env,
-            settings.llm_provider,
-            settings.chat_model,
+            llm_provider.effective_provider(settings, box.secrets),
+            llm_provider.chat_model(settings, box.secrets),
             settings.auth_enabled,
         )
         try:

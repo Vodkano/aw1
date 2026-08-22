@@ -3,12 +3,15 @@
 Recorrido de un mensaje:
 
     1. Se limpia la entrada (las faltas de ortografia no rompen nada).
-    2. Ollama decide la ruta; si no responde, manda la heuristica local.
-    3. El razonamiento se guarda en SQLite y **nunca** se envia al navegador.
-    4. Biografia -> Wikipedia, y el modelo redacta a partir de ese extracto
-       citando la fuente. Codigo y charla -> modelo local directo.
-    5. Actualidad -> se pide confirmacion antes de tocar GPT. Sin clave o sin
-       saldo no se hace ninguna llamada y se explica.
+    2. El modelo decide la ruta; si no responde, manda la heuristica local.
+    3. El razonamiento se guarda en la base de datos y **nunca** se envia al
+       navegador.
+    4. Codigo, analisis largo o actualidad ("heavy" / needs_fresh_data) ->
+       GPT automaticamente si esta configurado, sin pedir permiso -la
+       interfaz avisa despues, mostrando de que modelo vino la respuesta.
+       Sin clave configurada, cae al modelo local y se explica por que.
+    5. Biografia -> Wikipedia, y el modelo local redacta a partir de ese
+       extracto citando la fuente.
     6. Precio -> se ofrece lanzar el comparador, que es quien sabe hacerlo.
 
 Todo sale como eventos para que la interfaz escriba token a token.
@@ -24,6 +27,7 @@ from typing import Any
 
 import httpx
 
+from ..core import llm_provider
 from ..core.errors import ProviderError, ValidationError
 from ..core.secrets_store import SecretsStore
 from ..db.postgres_repository import PostgresRepository
@@ -61,7 +65,7 @@ class ChatService:
         llm: OllamaClient | GroqClient,
         judges: Judges,
         wikipedia: Wikipedia,
-        secrets: SecretsStore | None = None,
+        secrets: SecretsStore,
     ) -> None:
         self._settings = settings
         self._repo = repository
@@ -75,7 +79,7 @@ class ChatService:
         self._llm = client
 
     def _openai_key(self) -> str:
-        override = self._secrets.get("openai_api_key") if self._secrets else None
+        override = self._secrets.get("openai_api_key")
         if override:
             return override
         key = self._settings.openai_api_key
@@ -84,12 +88,8 @@ class ChatService:
     def gpt_configured(self) -> bool:
         return bool(self._openai_key().strip())
 
-    def _uses_groq(self) -> bool:
-        override = self._secrets.get("llm_provider") if self._secrets else None
-        return (override or self._settings.llm_provider) == "groq"
-
     def _chat_model(self) -> str:
-        return self._settings.groq_model if self._uses_groq() else self._settings.ollama_model
+        return llm_provider.chat_model(self._settings, self._secrets)
 
     # ------------------------------------------------------------------
     async def stream(
@@ -203,9 +203,10 @@ class ChatService:
                 yield ChatEvent("token", {"text": piece})
         except ProviderError as error:
             model = self._chat_model()
+            provider = llm_provider.effective_provider(self._settings, self._secrets)
             hint = (
                 f"la clave de Groq y el modelo «{model}»"
-                if self._uses_groq()
+                if provider == "groq"
                 else f"que `ollama serve` este corriendo y que el modelo «{model}» este descargado"
             )
             text = f"{error.message} Comprueba {hint}."

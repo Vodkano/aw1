@@ -178,13 +178,13 @@ class Settings(BaseSettings):
     def database_path(self) -> Path:
         return self.data_dir / "aw1.sqlite3"
 
+    # uses_groq/judge_model solo miran el entorno (AW1_LLM_PROVIDER y afines):
+    # sirven para probar Settings de forma aislada. La app en si nunca los usa
+    # directo -pasa por core.llm_provider, que ademas respeta el override del
+    # panel admin guardado en la base de datos.
     @property
     def uses_groq(self) -> bool:
         return self.llm_provider == "groq"
-
-    @property
-    def chat_model(self) -> str:
-        return self.groq_model if self.uses_groq else self.ollama_model
 
     @property
     def judge_model(self) -> str:

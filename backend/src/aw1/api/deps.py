@@ -9,6 +9,7 @@ from fastapi import Request
 from ..browser.pool import BrowserPool
 from ..chat.service import ChatService
 from ..chat.wikipedia import Wikipedia
+from ..core import llm_provider
 from ..core.api_keys_store import ApiKeyStore
 from ..core.ratelimit import RateLimiter
 from ..core.secrets_store import SecretsStore
@@ -22,19 +23,9 @@ from ..pricing.pipeline import PricePipeline
 from ..settings import Settings
 
 
-def _effective_provider(settings: Settings, secrets: SecretsStore) -> str:
-    return secrets.get("llm_provider") or settings.llm_provider
-
-
-def _judge_model(settings: Settings, secrets: SecretsStore) -> str:
-    if _effective_provider(settings, secrets) == "groq":
-        return settings.groq_fast_model or settings.groq_model
-    return settings.ollama_fast_model or settings.ollama_model
-
-
 def _build_llm_client(settings: Settings, secrets: SecretsStore) -> OllamaClient | GroqClient:
     """Elige Ollama o Groq y arma el cliente, con overrides del panel admin."""
-    if _effective_provider(settings, secrets) == "groq":
+    if llm_provider.effective_provider(settings, secrets) == "groq":
         key = secrets.get("groq_api_key")
         if not key and settings.groq_api_key:
             key = settings.groq_api_key.get_secret_value()
@@ -69,7 +60,8 @@ class Container:
 
         llm = _build_llm_client(settings, secrets)
         judges = Judges(
-            llm, model=_judge_model(settings, secrets), timeout=settings.ollama_judge_timeout
+            llm, model=llm_provider.judge_model(settings, secrets),
+            timeout=settings.ollama_judge_timeout,
         )
         browser = BrowserPool(settings)
         wikipedia = Wikipedia()
@@ -93,7 +85,8 @@ class Container:
         old_llm = self.llm
         new_llm = _build_llm_client(self.settings, self.secrets)
         self.llm = new_llm
-        self.judges.set_client(new_llm, model=_judge_model(self.settings, self.secrets))
+        model = llm_provider.judge_model(self.settings, self.secrets)
+        self.judges.set_client(new_llm, model=model)
         self.chat.set_client(new_llm)
         await old_llm.aclose()
 
