@@ -87,7 +87,12 @@ def route(message: str) -> ChatRoute:
             confidence=0.75 if person else 0.5, reason="Pregunta por una persona.",
         )
     if any(re.search(pattern, canon) for pattern in _CODE):
-        return ChatRoute(intent="codigo", heavy=True, confidence=0.65, reason="Peticion tecnica.")
+        # heavy=False a proposito: esta heuristica es un regex sin matices (no
+        # distingue "que es una variable" de "depurame este stacktrace de 40
+        # lineas"), y GPT solo debe consumirse cuando de verdad hace falta.
+        # El enrutador con IA es quien decide "heavy" con criterio; si no
+        # esta disponible, mejor quedarse en el modelo local por defecto.
+        return ChatRoute(intent="codigo", confidence=0.65, reason="Peticion tecnica.")
     if any(re.search(pattern, canon) for pattern in _FRESH):
         return ChatRoute(
             intent="actualidad", needs_fresh_data=True, search_terms=canon,

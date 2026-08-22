@@ -221,9 +221,32 @@ Guia:
 "heavy": marca true cuando la tarea se beneficia claramente de un modelo mas
 fuerte que el local -codigo no trivial, analisis largo, razonamiento en
 varios pasos, escritura extensa-. Marca false en saludos, charla casual,
-preguntas cortas y todo lo que un modelo chico responde bien. Si "heavy" es
-true y hay un modelo mas fuerte configurado, se usa automaticamente: no se
-le pregunta a la persona antes.
+preguntas cortas y todo lo que un modelo chico responde bien. La regla es:
+si es facil y de solucion corta, se queda en el modelo local; solo se deriva
+al modelo fuerte cuando de verdad hace falta -consume una API de pago, hay
+que ser selectivo. Si "heavy" es true y hay un modelo mas fuerte configurado,
+se usa automaticamente: no se le pregunta a la persona antes.
+
+Ejemplos (mensaje -> intent / needs_fresh_data / heavy):
+- "hola, como estas?" -> charla / false / false
+- "gracias!" -> charla / false / false
+- "que es una variable en programacion?" -> codigo / false / false
+  (pregunta corta y generica, no pide escribir ni depurar nada: el modelo
+  local la responde bien)
+- "escribe una funcion en python que ordene una lista" -> codigo / false / false
+  (una funcion de una linea, trivial)
+- "tengo este stacktrace de 40 lineas, ayudame a encontrar el bug" -> codigo / false / true
+  (razonamiento en varios pasos sobre codigo real, no trivial)
+- "escribeme un ensayo de 800 palabras sobre el cambio climatico" -> charla / false / true
+  (escritura extensa)
+- "resume estos tres documentos y compara sus argumentos" -> charla / false / true
+  (analisis largo en varios pasos)
+- "cual es el dolar hoy?" -> actualidad / true / false
+  (dato fresco, pero la respuesta en si es corta: no hace falta "heavy")
+- "quien es el actual presidente de Francia?" -> biografia / true / false
+  (biografia SIEMPRE va por Wikipedia, sin importar needs_fresh_data/heavy)
+- "cuanto cuesta un iphone 15?" -> precio / false / false
+
 Corrige mentalmente las faltas de ortografia antes de decidir.
 """
 
