@@ -1,4 +1,4 @@
-# AW1 junto a Ollama.
+# AW1 junto a Ollama y Postgres.
 #
 #   docker compose up -d --build
 #   docker compose exec ollama ollama pull mistral
@@ -17,16 +17,20 @@ services:
       AW1_OLLAMA_HOST: http://ollama:11434
       AW1_OLLAMA_MODEL: ${AW1_OLLAMA_MODEL:-mistral}
       AW1_OLLAMA_FAST_MODEL: ${AW1_OLLAMA_FAST_MODEL:-}
+      AW1_LLM_PROVIDER: ${AW1_LLM_PROVIDER:-ollama}
+      AW1_GROQ_API_KEY: ${AW1_GROQ_API_KEY:-}
       AW1_API_TOKEN: ${AW1_API_TOKEN:-}
       AW1_OPENAI_API_KEY: ${AW1_OPENAI_API_KEY:-}
       AW1_ALLOWED_ORIGINS: ${AW1_ALLOWED_ORIGINS:-http://127.0.0.1:8000,http://localhost:8000}
       AW1_BROWSER_MAX_CONTEXTS: ${AW1_BROWSER_MAX_CONTEXTS:-3}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://aw1:aw1@postgres:5432/aw1}
     volumes:
       - aw1-data:/data
     # Chromium necesita mas memoria compartida que la que da Docker por defecto.
     shm_size: "1gb"
     depends_on:
       - ollama
+      - postgres
 
   ollama:
     image: ollama/ollama:latest
@@ -39,6 +43,18 @@ services:
     #     reservations:
     #       devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
 
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aw1
+      POSTGRES_PASSWORD: aw1
+      POSTGRES_DB: aw1
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Solo la red interna de docker compose: nunca expuesto a internet.
+
 volumes:
   aw1-data:
   ollama-models:
+  postgres-data:
