@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 # Las unicas claves que el panel puede leer/escribir: nunca un nombre libre,
 # para no convertir esto en un almacen generico de lo que sea.
 ALLOWED_SECRETS = frozenset(
-    {"openai_api_key", "groq_api_key", "ollama_host", "llm_provider"}
+    {"openai_api_key", "groq_api_key", "ollama_host", "ollama_tunnel_key", "llm_provider"}
 )
 
 
@@ -74,7 +74,7 @@ async def set_config(
     if name == "llm_provider" and payload.value not in ("ollama", "groq"):
         raise ValidationError("llm_provider debe ser 'ollama' o 'groq'.")
     await box.secrets.set(name, payload.value)
-    if name in ("llm_provider", "groq_api_key", "ollama_host"):
+    if name in ("llm_provider", "groq_api_key", "ollama_host", "ollama_tunnel_key"):
         await box.reload_llm()
     return await get_config(request, box)
 
@@ -87,7 +87,7 @@ async def delete_config(
     if name not in ALLOWED_SECRETS:
         raise ValidationError(f"Clave no reconocida: {name}")
     await box.secrets.delete(name)
-    if name in ("llm_provider", "groq_api_key", "ollama_host"):
+    if name in ("llm_provider", "groq_api_key", "ollama_host", "ollama_tunnel_key"):
         await box.reload_llm()
     return await get_config(request, box)
 

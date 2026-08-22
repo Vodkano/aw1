@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     ollama_chat_timeout: float = Field(default=120.0, gt=0)
     ollama_judge_timeout: float = Field(default=45.0, gt=0)
     ollama_num_ctx: int = Field(default=8192, ge=2048, le=131072)
+    # Si Ollama se expone por un tunel publico (ej. Cloudflare Tunnel hacia
+    # una Mac), esta clave viaja en cada peticion como header
+    # "X-Aw1-Tunnel-Key" y un WAF la exige del otro lado -Ollama no tiene
+    # autenticacion propia, asi que sin esto cualquiera que adivine la URL
+    # del tunel podria usarlo.
+    ollama_tunnel_key: SecretStr | None = None
 
     # -- Groq (proveedor alternativo, recomendado en la nube) ---------------
     # Ollama corriendo local es gratis pero necesita CPU/RAM dedicada 24/7.

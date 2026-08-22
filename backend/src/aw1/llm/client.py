@@ -27,10 +27,22 @@ _HEALTH_TTL = 8.0
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, *, num_ctx: int = 8192) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        num_ctx: int = 8192,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
+        """``extra_headers`` va en cada peticion. Se usa para el caso de Ollama
+        expuesto por un tunel (ej. Cloudflare Tunnel hacia una Mac): una clave
+        compartida que un WAF verifica antes de dejar pasar el trafico, ya que
+        Ollama mismo no tiene autenticacion propia."""
         self._base = base_url.rstrip("/")
         self._num_ctx = num_ctx
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=5.0))
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(180.0, connect=5.0), headers=extra_headers or {}
+        )
         self._health: tuple[float, bool] = (0.0, False)
         self._models: list[str] = []
 

@@ -31,7 +31,11 @@ def _build_llm_client(settings: Settings, secrets: SecretsStore) -> OllamaClient
             key = settings.groq_api_key.get_secret_value()
         return GroqClient(settings.groq_base_url, api_key=key or "")
     host = secrets.get("ollama_host") or settings.ollama_host
-    return OllamaClient(host, num_ctx=settings.ollama_num_ctx)
+    tunnel_key = secrets.get("ollama_tunnel_key")
+    if not tunnel_key and settings.ollama_tunnel_key:
+        tunnel_key = settings.ollama_tunnel_key.get_secret_value()
+    headers = {"X-Aw1-Tunnel-Key": tunnel_key} if tunnel_key else None
+    return OllamaClient(host, num_ctx=settings.ollama_num_ctx, extra_headers=headers)
 
 
 @dataclass(slots=True)
