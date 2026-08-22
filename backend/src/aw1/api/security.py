@@ -11,6 +11,7 @@ import hmac
 
 from fastapi import Request
 
+from ..core.api_keys_store import ApiKeyStore
 from ..core.errors import AuthError, RateLimitError
 from ..core.ratelimit import RateLimiter
 from ..settings import Settings
@@ -35,11 +36,12 @@ def check_origin(request: Request, settings: Settings) -> None:
         raise AuthError("Origen no permitido.")
 
 
-def check_token(request: Request, settings: Settings) -> None:
-    if not settings.auth_enabled:
+def check_token(
+    request: Request, settings: Settings, extra: ApiKeyStore | None = None
+) -> None:
+    has_extra_keys = extra is not None and bool(extra.configured)
+    if not settings.auth_enabled and not has_extra_keys:
         return
-    assert settings.api_token is not None
-    expected = settings.api_token.get_secret_value()
     header = request.headers.get("authorization", "")
     scheme, _, value = header.partition(" ")
     presented = value.strip() if scheme.lower() == "bearer" else ""
@@ -48,8 +50,24 @@ def check_token(request: Request, settings: Settings) -> None:
     # En SSE el navegador no permite cabeceras: se acepta el token por query.
     if not presented:
         presented = str(request.query_params.get("token", "")).strip()
+    if presented:
+        if settings.auth_enabled:
+            assert settings.api_token is not None
+            expected = settings.api_token.get_secret_value()
+            if hmac.compare_digest(presented, expected):
+                return
+        if extra is not None and extra.verify(presented):
+            return
+    raise AuthError("Se requiere un token valido para usar esta API.")
+
+
+def check_admin(request: Request, settings: Settings) -> None:
+    if not settings.admin_password:
+        raise AuthError("El panel admin no esta configurado (falta AW1_ADMIN_PASSWORD).")
+    presented = request.headers.get("x-admin-password", "").strip()
+    expected = settings.admin_password.get_secret_value()
     if not presented or not hmac.compare_digest(presented, expected):
-        raise AuthError("Se requiere un token valido para usar esta API.")
+        raise AuthError("Password de administrador invalida.")
 
 
 def check_rate(request: Request, limiter: RateLimiter) -> None:

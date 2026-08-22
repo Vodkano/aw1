@@ -263,6 +263,62 @@ class PostgresRepository:
             _iso(utcnow() + timedelta(seconds=ttl)),
         )
 
+    # -- panel admin: secretos --------------------------------------------------
+    async def all_secrets(self) -> dict[str, str]:
+        rows = await self._conn.fetch("SELECT key, value FROM secrets")
+        return {row["key"]: row["value"] for row in rows}
+
+    async def set_secret(self, key: str, value: str) -> None:
+        await self._conn.execute(
+            "INSERT INTO secrets (key, value, updated_at) VALUES ($1, $2, $3) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value, "
+            "updated_at = excluded.updated_at",
+            key, value, _iso(utcnow()),
+        )
+
+    async def delete_secret(self, key: str) -> None:
+        await self._conn.execute("DELETE FROM secrets WHERE key = $1", key)
+
+    # -- panel admin: claves de api ----------------------------------------------
+    async def create_api_key(self, label: str, key_hash: str, key_preview: str) -> dict[str, Any]:
+        now = utcnow()
+        key_id = await self._conn.fetchval(
+            "INSERT INTO api_keys (label, key_hash, key_preview, created_at) "
+            "VALUES ($1, $2, $3, $4) RETURNING id",
+            label, key_hash, key_preview, _iso(now),
+        )
+        return {
+            "id": int(key_id or 0), "label": label,
+            "key_preview": key_preview, "created_at": now,
+        }
+
+    async def list_api_keys(self) -> list[dict[str, Any]]:
+        rows = await self._conn.fetch(
+            "SELECT id, label, key_hash, key_preview, created_at FROM api_keys ORDER BY id DESC"
+        )
+        return [
+            {
+                "id": row["id"], "label": row["label"], "key_hash": row["key_hash"],
+                "key_preview": row["key_preview"], "created_at": _parse(row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    async def get_api_key(self, key_id: int) -> dict[str, Any] | None:
+        row = await self._conn.fetchrow(
+            "SELECT id, label, key_hash, key_preview FROM api_keys WHERE id = $1", key_id
+        )
+        if row is None:
+            return None
+        return {
+            "id": row["id"], "label": row["label"],
+            "key_hash": row["key_hash"], "key_preview": row["key_preview"],
+        }
+
+    async def delete_api_key(self, key_id: int) -> bool:
+        status = await self._conn.execute("DELETE FROM api_keys WHERE id = $1", key_id)
+        return _rowcount(status) > 0
+
     # -- borrado total ------------------------------------------------------------
     async def purge(self, tables: Sequence[str] | None = None) -> dict[str, int]:
         allowed = ("messages", "reasoning", "saved_items", "searches", "conversations", "cache")

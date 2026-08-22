@@ -64,6 +64,12 @@ class Judges:
         self._timeout = timeout
         self.stats = JudgeStats()
 
+    def set_client(self, client: OllamaClient | GroqClient, *, model: str | None = None) -> None:
+        """Cambia el cliente LLM en caliente (panel admin), sin reiniciar el proceso."""
+        self._llm = client
+        if model is not None:
+            self._model = model
+
     # ------------------------------------------------------------------
     # 1. Plan de busqueda
     # ------------------------------------------------------------------

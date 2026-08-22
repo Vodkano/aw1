@@ -53,3 +53,21 @@ CREATE TABLE IF NOT EXISTS cache (
     payload     TEXT NOT NULL,
     expires_at  TEXT NOT NULL
 );
+
+-- Panel admin: claves de proveedores (openai_api_key, groq_api_key,
+-- ollama_host, llm_provider) editables en caliente, sin redeploy.
+CREATE TABLE IF NOT EXISTS secrets (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Panel admin: claves de API emitidas para llamar esta API desde afuera
+-- (ademas del AW1_API_TOKEN de entorno). Solo se guarda el hash.
+CREATE TABLE IF NOT EXISTS api_keys (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    label       TEXT NOT NULL,
+    key_hash    TEXT NOT NULL UNIQUE,
+    key_preview TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);

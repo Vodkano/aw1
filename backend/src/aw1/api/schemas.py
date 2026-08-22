@@ -61,6 +61,36 @@ class StoredMessage(BaseModel):
     created_at: datetime
 
 
+class SetSecretRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(min_length=1, max_length=4000)
+
+
+class AdminConfig(BaseModel):
+    llm_provider: str
+    ollama_host: str
+    groq_configured: bool
+    openai_configured: bool
+
+
+class CreateApiKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=80)
+
+
+class ApiKeySummary(BaseModel):
+    id: int
+    label: str
+    key_preview: str
+    created_at: datetime
+
+
+class ApiKeyCreated(ApiKeySummary):
+    value: str
+
+
 class StatusResponse(BaseModel):
     version: str
     env: str

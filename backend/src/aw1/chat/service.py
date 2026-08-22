@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 
 from ..core.errors import ProviderError, ValidationError
+from ..core.secrets_store import SecretsStore
 from ..db.postgres_repository import PostgresRepository
 from ..db.repository import Repository
 from ..llm.client import OllamaClient
@@ -64,12 +65,35 @@ class ChatService:
         llm: OllamaClient | GroqClient,
         judges: Judges,
         wikipedia: Wikipedia,
+        secrets: SecretsStore | None = None,
     ) -> None:
         self._settings = settings
         self._repo = repository
         self._llm = llm
         self._judges = judges
         self._wiki = wikipedia
+        self._secrets = secrets
+
+    def set_client(self, client: OllamaClient | GroqClient) -> None:
+        """Cambia el cliente LLM en caliente (panel admin), sin reiniciar el proceso."""
+        self._llm = client
+
+    def _openai_key(self) -> str:
+        override = self._secrets.get("openai_api_key") if self._secrets else None
+        if override:
+            return override
+        key = self._settings.openai_api_key
+        return key.get_secret_value() if key else ""
+
+    def gpt_configured(self) -> bool:
+        return bool(self._openai_key().strip())
+
+    def _uses_groq(self) -> bool:
+        override = self._secrets.get("llm_provider") if self._secrets else None
+        return (override or self._settings.llm_provider) == "groq"
+
+    def _chat_model(self) -> str:
+        return self._settings.groq_model if self._uses_groq() else self._settings.ollama_model
 
     # ------------------------------------------------------------------
     async def stream(
@@ -113,7 +137,7 @@ class ChatService:
             return
 
         if route.needs_fresh_data and not allow_gpt:
-            if self._settings.gpt_configured:
+            if self.gpt_configured():
                 yield ChatEvent("confirm", {"question": GPT_QUESTION, "message": clean})
                 return
             # Sin clave no se ofrece nada: se responde en local y se avisa.
@@ -141,7 +165,7 @@ class ChatService:
                 yield ChatEvent("source", {"url": url, "kind": "wikipedia"})
 
         # -- respuesta en streaming --------------------------------------
-        if allow_gpt and route.needs_fresh_data and self._settings.gpt_configured:
+        if allow_gpt and route.needs_fresh_data and self.gpt_configured():
             async for event in self._answer_with_gpt(conversation, clean, history):
                 yield event
             return
@@ -176,16 +200,16 @@ class ChatService:
         try:
             async for piece in self._llm.stream(
                 messages,
-                model=self._settings.chat_model,
+                model=self._chat_model(),
                 timeout=self._settings.ollama_chat_timeout,
             ):
                 collected.append(piece)
                 yield ChatEvent("token", {"text": piece})
         except ProviderError as error:
-            model = self._settings.chat_model
+            model = self._chat_model()
             hint = (
                 f"la clave de Groq y el modelo «{model}»"
-                if self._settings.uses_groq
+                if self._uses_groq()
                 else f"que `ollama serve` este corriendo y que el modelo «{model}» este descargado"
             )
             text = f"{error.message} Comprueba {hint}."
@@ -215,7 +239,6 @@ class ChatService:
     async def _answer_with_gpt(
         self, conversation: str, message: str, history: list[dict[str, str]]
     ) -> AsyncIterator[ChatEvent]:
-        assert self._settings.openai_api_key is not None
         payload = {
             "model": self._settings.openai_model,
             "messages": [
@@ -234,9 +257,7 @@ class ChatService:
             "max_tokens": 900,
             "stream": True,
         }
-        headers = {
-            "Authorization": f"Bearer {self._settings.openai_api_key.get_secret_value()}"
-        }
+        headers = {"Authorization": f"Bearer {self._openai_key()}"}
         collected: list[str] = []
         try:
             async with httpx.AsyncClient(timeout=60.0) as client, client.stream(
@@ -317,13 +338,13 @@ class ChatService:
     async def status(self) -> dict[str, Any]:
         online = await self._llm.available()
         installed = await self._llm.models() if online else []
-        wanted = self._settings.chat_model
+        wanted = self._chat_model()
         return {
             "ollama": "online" if online else "offline",
             "model": wanted,
             "model_ready": await self._llm.has_model(wanted) if online else False,
             "models": installed[:20],
-            "gpt_configured": self._settings.gpt_configured,
+            "gpt_configured": self.gpt_configured(),
             "database": "online" if await self._repo.healthy() else "offline",
             "env": self._settings.env,
             "auth_enabled": self._settings.auth_enabled,

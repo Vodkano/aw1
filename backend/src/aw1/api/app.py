@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -16,15 +17,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
-import os
-
 from .. import __version__
 from ..core import netguard
 from ..core.errors import Aw1Error, ValidationError
 from ..core.logging_setup import configure_logging, request_id
 from ..settings import Settings, get_settings
 from .deps import Container
-from .routes import chat, health, memory, prices
+from .routes import admin, chat, health, memory, prices
 from .security import check_origin, check_rate, check_token
 
 logger = logging.getLogger(__name__)
@@ -105,7 +104,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path = request.url.path
             if path.startswith("/api") and path not in PUBLIC_PATHS:
                 check_origin(request, settings)
-                check_token(request, settings)
+                # /api/admin/* se rige solo por check_admin (password aparte,
+                # dentro de cada ruta): si tambien exigiera el token general,
+                # el panel se bloquearia a si mismo en cuanto existiera alguna
+                # clave de API emitida.
+                if not path.startswith("/api/admin"):
+                    check_token(request, settings, request.app.state.container.api_keys)
                 check_rate(request, request.app.state.container.limiter)
             response = await call_next(request)
         except Aw1Error as error:
@@ -151,6 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(chat.router)
     app.include_router(prices.router)
     app.include_router(memory.router)
+    app.include_router(admin.router)
 
     _mount_frontend(app)
     return app

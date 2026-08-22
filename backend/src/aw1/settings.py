@@ -83,6 +83,10 @@ class Settings(BaseSettings):
 
     # -- seguridad ----------------------------------------------------------
     api_token: SecretStr | None = None
+    # Panel privado para guardar claves de proveedores (OpenAI, Groq, etc.) y
+    # generar claves de API adicionales, sin reiniciar el proceso. Sin esto
+    # definido, el panel /api/admin/* rechaza todo.
+    admin_password: SecretStr | None = None
     # NoDecode: sin esto, pydantic-settings intenta parsear el valor del
     # entorno como JSON antes de que el validador de abajo vea la lista
     # separada por comas documentada en .env.example, y siempre falla.
