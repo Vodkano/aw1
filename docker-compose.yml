@@ -16,7 +16,11 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       AW1_ENV: ${AW1_ENV:-development}
-      AW1_OLLAMA_HOST: http://ollama:11434
+      # Por defecto usa el contenedor `ollama` de este mismo compose. Para
+      # apuntar a un Ollama externo (ej. un tunel hacia otra maquina), define
+      # AW1_OLLAMA_HOST (y AW1_OLLAMA_TUNNEL_KEY si el tunel lo exige) en .env.
+      AW1_OLLAMA_HOST: ${AW1_OLLAMA_HOST:-http://ollama:11434}
+      AW1_OLLAMA_TUNNEL_KEY: ${AW1_OLLAMA_TUNNEL_KEY:-}
       AW1_OLLAMA_MODEL: ${AW1_OLLAMA_MODEL:-mistral}
       AW1_OLLAMA_FAST_MODEL: ${AW1_OLLAMA_FAST_MODEL:-}
       AW1_LLM_PROVIDER: ${AW1_LLM_PROVIDER:-ollama}
