@@ -181,9 +181,16 @@ def _mount_frontend(app: FastAPI, web_dist: Path) -> None:
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
 
+    def _index() -> FileResponse:
+        # index.html SI cambia de contenido sin cambiar de nombre (apunta al
+        # bundle nuevo despues de cada deploy): sin este header, el navegador
+        # puede seguir sirviendo una version vieja -que carga un JS viejo y
+        # deja a la persona viendo un fantasma del build anterior.
+        return FileResponse(web_dist / "index.html", headers={"Cache-Control": "no-cache"})
+
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
-        return FileResponse(web_dist / "index.html")
+        return _index()
 
     @app.get("/{path:path}", include_in_schema=False)
     async def spa(path: str) -> Response:
@@ -193,7 +200,7 @@ def _mount_frontend(app: FastAPI, web_dist: Path) -> None:
         candidate = (web_dist / path).resolve()
         if candidate.is_file() and candidate.is_relative_to(web_dist.resolve()):
             return FileResponse(candidate)
-        return FileResponse(web_dist / "index.html")
+        return _index()
 
 
 def _error(status: int, message: str, rid: str) -> JSONResponse:
