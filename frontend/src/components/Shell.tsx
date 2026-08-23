@@ -5,6 +5,7 @@ import {
   Tags,
   Bookmark,
   SlidersHorizontal,
+  Bot,
   Moon,
   Sun,
   Circle,
@@ -12,7 +13,6 @@ import {
 import type { Status } from "../types";
 import { useTheme } from "../lib/useTheme";
 
-// "admin" no aparece en NAV a proposito: pagina privada, solo por URL (#admin).
 export type ViewKey = "chat" | "prices" | "memory" | "settings" | "admin";
 
 const NAV: { key: ViewKey; label: string; icon: typeof MessageSquare }[] = [
@@ -20,6 +20,9 @@ const NAV: { key: ViewKey; label: string; icon: typeof MessageSquare }[] = [
   { key: "prices", label: "Precios", icon: Tags },
   { key: "memory", label: "Guardado", icon: Bookmark },
   { key: "settings", label: "Ajustes", icon: SlidersHorizontal },
+  // Sigue exigiendo su propia password (X-Admin-Password) aparte del token
+  // general -el boton solo ahorra tener que escribir #admin a mano.
+  { key: "admin", label: "Admin", icon: Bot },
 ];
 
 function StatusDot({ status }: { status: Status | null }) {
