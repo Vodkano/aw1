@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 
 from ...core import llm_provider
-from ...core.errors import NotFoundError, ValidationError
+from ...core.errors import NotFoundError, ProviderError, ValidationError
 from ..deps import Container, container
 from ..schemas import (
     AdminConfig,
@@ -22,8 +22,14 @@ from ..schemas import (
     ApiKeyCreated,
     ApiKeySummary,
     CreateApiKeyRequest,
+    CreateTelegramProfileRequest,
+    GeneratedPromptResult,
+    GeneratePromptRequest,
     SetSecretRequest,
+    TelegramProfileDetail,
+    TelegramProfileSummary,
     TestSecretResult,
+    UpdateTelegramProfileRequest,
 )
 from ..security import check_admin
 
@@ -151,3 +157,105 @@ async def delete_api_key(key_id: int, box: Container = Depends(container)) -> No
     ok = await box.api_keys.delete(key_id)
     if not ok:
         raise NotFoundError("Esa clave no existe.")
+
+
+# -- perfiles de Telegram: cada uno ES un bot independiente -----------------
+@router.get("/telegram-profiles", response_model=list[TelegramProfileSummary])
+async def list_telegram_profiles(
+    box: Container = Depends(container),
+) -> list[TelegramProfileSummary]:
+    return [TelegramProfileSummary(**row) for row in box.telegram_profiles.list()]
+
+
+@router.post("/telegram-profiles", response_model=TelegramProfileDetail, status_code=201)
+async def create_telegram_profile(
+    payload: CreateTelegramProfileRequest, box: Container = Depends(container)
+) -> TelegramProfileDetail:
+    row = await box.telegram_profiles.create(
+        label=payload.label, bot_token=payload.bot_token, system_prompt=payload.system_prompt,
+    )
+    return TelegramProfileDetail(**row)
+
+
+@router.get("/telegram-profiles/{profile_id}", response_model=TelegramProfileDetail)
+async def get_telegram_profile(
+    profile_id: str, box: Container = Depends(container)
+) -> TelegramProfileDetail:
+    row = await box.telegram_profiles.get(profile_id)
+    if row is None:
+        raise NotFoundError("Ese perfil no existe.")
+    return TelegramProfileDetail(**row)
+
+
+@router.put("/telegram-profiles/{profile_id}", response_model=TelegramProfileDetail)
+async def update_telegram_profile(
+    profile_id: str, payload: UpdateTelegramProfileRequest, box: Container = Depends(container)
+) -> TelegramProfileDetail:
+    row = await box.telegram_profiles.update(
+        profile_id, label=payload.label, bot_token=payload.bot_token,
+        system_prompt=payload.system_prompt, enabled=payload.enabled,
+    )
+    if row is None:
+        raise NotFoundError("Ese perfil no existe.")
+    return TelegramProfileDetail(**row)
+
+
+@router.delete("/telegram-profiles/{profile_id}", status_code=204)
+async def delete_telegram_profile(profile_id: str, box: Container = Depends(container)) -> None:
+    if not await box.telegram_profiles.delete(profile_id):
+        raise NotFoundError("Ese perfil no existe.")
+
+
+@router.post("/telegram-profiles/test-token", response_model=TestSecretResult)
+async def test_telegram_token(
+    payload: SetSecretRequest, box: Container = Depends(container)
+) -> TestSecretResult:
+    return TestSecretResult(**await box.telegram_profiles.test_token(payload.value))
+
+
+async def _draft_system_prompt(description: str, box: Container) -> str:
+    """Un prompt de sistema listo para un bot de Telegram, a partir de una
+    descripcion corta. No es un turno de ChatService.stream() -eso traeria
+    ruteo/memoria/menciones, de mas para esto- sino una llamada directa y
+    simple a OpenAI, mismo patron crudo que _test_provider_key."""
+    key = llm_provider.openai_key(box.settings, box.secrets)
+    if not key.strip():
+        raise ValidationError("GPT no esta configurado; agrega una clave de OpenAI primero.")
+    payload = {
+        "model": box.settings.openai_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Escribes prompts de sistema para bots de Telegram en espanol, "
+                    "breves, claros y accionables. A partir de una descripcion corta "
+                    "del proposito del bot, redacta un system prompt completo y listo "
+                    "para usar -tono, limites, que hacer y que no hacer. Responde SOLO "
+                    "con el texto del prompt, sin explicaciones ni comillas."
+                ),
+            },
+            {"role": "user", "content": description[:500]},
+        ],
+        "temperature": 0.6,
+        "max_tokens": 400,
+        "stream": False,
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.post(
+                f"{box.settings.openai_base_url.rstrip('/')}/chat/completions",
+                json=payload, headers={"Authorization": f"Bearer {key}"},
+            )
+        except httpx.HTTPError as error:
+            raise ProviderError("No se pudo contactar a GPT.") from error
+    if response.status_code != 200:
+        raise ProviderError("GPT no pudo generar el prompt.")
+    return str(response.json()["choices"][0]["message"]["content"]).strip()
+
+
+@router.post("/telegram-profiles/generate-prompt", response_model=GeneratedPromptResult)
+async def generate_prompt(
+    payload: GeneratePromptRequest, box: Container = Depends(container)
+) -> GeneratedPromptResult:
+    text = await _draft_system_prompt(payload.description, box)
+    return GeneratedPromptResult(system_prompt=text)

@@ -40,6 +40,16 @@ def _item_from_row(row: aiosqlite.Row) -> dict[str, Any]:
     }
 
 
+def _telegram_profile_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "label": row["label"], "bot_token": row["bot_token"],
+        "bot_token_hash": row["bot_token_hash"], "bot_username": row["bot_username"],
+        "webhook_secret": row["webhook_secret"], "system_prompt": row["system_prompt"],
+        "enabled": bool(row["enabled"]), "created_at": _parse(row["created_at"]),
+        "updated_at": _parse(row["updated_at"]),
+    }
+
+
 def _escape_like(value: str) -> str:
     """Escapa los comodines de LIKE (%, _) para que un keyword literal no se
     interprete como patron -si no, una palabra con guion bajo (ej. de un
@@ -389,6 +399,90 @@ class Repository:
     async def delete_api_key(self, key_id: int) -> bool:
         async with self._lock:
             cursor = await self._conn.execute("DELETE FROM api_keys WHERE id = ?", (key_id,))
+            await self._conn.commit()
+            return bool(cursor.rowcount)
+
+    # -- panel admin: perfiles de telegram -----------------------------------
+    async def create_telegram_profile(
+        self, profile_id: str, label: str, bot_token: str, bot_token_hash: str,
+        bot_username: str, webhook_secret: str, system_prompt: str,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO telegram_profiles (id, label, bot_token, bot_token_hash, "
+                "bot_username, webhook_secret, system_prompt, enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    profile_id, label, bot_token, bot_token_hash, bot_username,
+                    webhook_secret, system_prompt, _iso(now), _iso(now),
+                ),
+            )
+            await self._conn.commit()
+        return {
+            "id": profile_id, "label": label, "bot_token": bot_token,
+            "bot_token_hash": bot_token_hash, "bot_username": bot_username,
+            "webhook_secret": webhook_secret, "system_prompt": system_prompt,
+            "enabled": True, "created_at": now, "updated_at": now,
+        }
+
+    async def list_telegram_profiles(self) -> list[dict[str, Any]]:
+        cursor = await self._conn.execute(
+            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles "
+            "ORDER BY created_at DESC"
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [_telegram_profile_from_row(row) for row in rows]
+
+    async def get_telegram_profile(self, profile_id: str) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(
+            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles WHERE id = ?",
+            (profile_id,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _telegram_profile_from_row(row) if row else None
+
+    async def get_telegram_profile_by_token_hash(
+        self, bot_token_hash: str
+    ) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(
+            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles "
+            "WHERE bot_token_hash = ?",
+            (bot_token_hash,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _telegram_profile_from_row(row) if row else None
+
+    async def update_telegram_profile(
+        self, profile_id: str, *, label: str, bot_token: str, bot_token_hash: str,
+        bot_username: str, system_prompt: str, enabled: bool,
+    ) -> dict[str, Any] | None:
+        now = utcnow()
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "UPDATE telegram_profiles SET label = ?, bot_token = ?, bot_token_hash = ?, "
+                "bot_username = ?, system_prompt = ?, enabled = ?, updated_at = ? WHERE id = ?",
+                (
+                    label, bot_token, bot_token_hash, bot_username, system_prompt,
+                    int(enabled), _iso(now), profile_id,
+                ),
+            )
+            await self._conn.commit()
+            if not cursor.rowcount:
+                return None
+        return await self.get_telegram_profile(profile_id)
+
+    async def delete_telegram_profile(self, profile_id: str) -> bool:
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "DELETE FROM telegram_profiles WHERE id = ?", (profile_id,)
+            )
             await self._conn.commit()
             return bool(cursor.rowcount)
 

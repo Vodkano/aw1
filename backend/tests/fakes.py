@@ -29,6 +29,7 @@ class FakeOllama:
         self.fail_json = fail_json
         self.json_calls: list[str] = []
         self.chat_calls: list[str] = []
+        self.last_messages: list[dict[str, str]] = []
         self.installed = ["mistral:latest"]
 
     async def available(self) -> bool:
@@ -86,6 +87,7 @@ class FakeOllama:
         timeout: float = 180.0,
     ) -> AsyncIterator[str]:
         self.chat_calls.append(messages[-1]["content"])
+        self.last_messages = messages
         if not self.online:
             from aw1.core.errors import ProviderError
 

@@ -47,6 +47,16 @@ def _item_from_row(row: asyncpg.Record) -> dict[str, Any]:
     }
 
 
+def _telegram_profile_from_row(row: asyncpg.Record) -> dict[str, Any]:
+    return {
+        "id": row["id"], "label": row["label"], "bot_token": row["bot_token"],
+        "bot_token_hash": row["bot_token_hash"], "bot_username": row["bot_username"],
+        "webhook_secret": row["webhook_secret"], "system_prompt": row["system_prompt"],
+        "enabled": bool(row["enabled"]), "created_at": _parse(row["created_at"]),
+        "updated_at": _parse(row["updated_at"]),
+    }
+
+
 def _escape_like(value: str) -> str:
     """Ver repository.py:_escape_like -mismo motivo, misma logica."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -340,6 +350,74 @@ class PostgresRepository:
 
     async def delete_api_key(self, key_id: int) -> bool:
         status = await self._conn.execute("DELETE FROM api_keys WHERE id = $1", key_id)
+        return _rowcount(status) > 0
+
+    # -- panel admin: perfiles de telegram -----------------------------------------
+    async def create_telegram_profile(
+        self, profile_id: str, label: str, bot_token: str, bot_token_hash: str,
+        bot_username: str, webhook_secret: str, system_prompt: str,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        await self._conn.execute(
+            "INSERT INTO telegram_profiles (id, label, bot_token, bot_token_hash, "
+            "bot_username, webhook_secret, system_prompt, enabled, created_at, updated_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8)",
+            profile_id, label, bot_token, bot_token_hash, bot_username,
+            webhook_secret, system_prompt, _iso(now),
+        )
+        return {
+            "id": profile_id, "label": label, "bot_token": bot_token,
+            "bot_token_hash": bot_token_hash, "bot_username": bot_username,
+            "webhook_secret": webhook_secret, "system_prompt": system_prompt,
+            "enabled": True, "created_at": now, "updated_at": now,
+        }
+
+    async def list_telegram_profiles(self) -> list[dict[str, Any]]:
+        rows = await self._conn.fetch(
+            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles "
+            "ORDER BY created_at DESC"
+        )
+        return [_telegram_profile_from_row(row) for row in rows]
+
+    async def get_telegram_profile(self, profile_id: str) -> dict[str, Any] | None:
+        row = await self._conn.fetchrow(
+            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles WHERE id = $1",
+            profile_id,
+        )
+        return _telegram_profile_from_row(row) if row else None
+
+    async def get_telegram_profile_by_token_hash(
+        self, bot_token_hash: str
+    ) -> dict[str, Any] | None:
+        row = await self._conn.fetchrow(
+            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles "
+            "WHERE bot_token_hash = $1",
+            bot_token_hash,
+        )
+        return _telegram_profile_from_row(row) if row else None
+
+    async def update_telegram_profile(
+        self, profile_id: str, *, label: str, bot_token: str, bot_token_hash: str,
+        bot_username: str, system_prompt: str, enabled: bool,
+    ) -> dict[str, Any] | None:
+        now = utcnow()
+        status = await self._conn.execute(
+            "UPDATE telegram_profiles SET label = $1, bot_token = $2, bot_token_hash = $3, "
+            "bot_username = $4, system_prompt = $5, enabled = $6, updated_at = $7 WHERE id = $8",
+            label, bot_token, bot_token_hash, bot_username, system_prompt,
+            int(enabled), _iso(now), profile_id,
+        )
+        if _rowcount(status) == 0:
+            return None
+        return await self.get_telegram_profile(profile_id)
+
+    async def delete_telegram_profile(self, profile_id: str) -> bool:
+        status = await self._conn.execute(
+            "DELETE FROM telegram_profiles WHERE id = $1", profile_id
+        )
         return _rowcount(status) > 0
 
     # -- borrado total ------------------------------------------------------------

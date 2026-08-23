@@ -64,6 +64,24 @@ async def _collect(stream: AsyncIterator[ChatEvent]) -> list[ChatEvent]:
     return [event async for event in stream]
 
 
+# --- system_prompt personalizado (perfiles de Telegram) -----------------------
+async def test_a_custom_system_prompt_overrides_the_default(repo, test_settings):
+    """Feature para Telegram: cada perfil tiene su propia personalidad. Sin
+    system_prompt, se usa CHAT_SYSTEM; con uno, ese reemplaza al default."""
+    service, fake = await _build_service(repo, test_settings, None)
+
+    await _collect(service.stream("hola", system_prompt="Eres un pirata. Habla como tal."))
+    assert fake.last_messages[0] == {"role": "system", "content": "Eres un pirata. Habla como tal."}
+
+
+async def test_without_a_custom_system_prompt_the_default_is_used(repo, test_settings):
+    from aw1.llm.prompts import CHAT_SYSTEM
+
+    service, fake = await _build_service(repo, test_settings, None)
+    await _collect(service.stream("hola"))
+    assert fake.last_messages[0] == {"role": "system", "content": CHAT_SYSTEM}
+
+
 # --- dispatch de herramientas ------------------------------------------------
 async def test_a_tool_dispatches_by_matching_intent(repo, test_settings):
     tool = DummyTool()

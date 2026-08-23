@@ -108,6 +108,44 @@ class AdminStatus(BaseModel):
     saved_items: int
 
 
+class CreateTelegramProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=80)
+    bot_token: str = Field(min_length=10, max_length=200)
+    system_prompt: str = Field(default="", max_length=4000)
+
+
+class UpdateTelegramProfileRequest(CreateTelegramProfileRequest):
+    enabled: bool = True
+
+
+class TelegramProfileSummary(BaseModel):
+    id: str
+    label: str
+    bot_username: str
+    token_preview: str
+    system_prompt: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class TelegramProfileDetail(TelegramProfileSummary):
+    bot_token: str
+    webhook_registered: bool = True
+
+
+class GeneratePromptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=500)
+
+
+class GeneratedPromptResult(BaseModel):
+    system_prompt: str
+
+
 class StatusResponse(BaseModel):
     version: str
     env: str

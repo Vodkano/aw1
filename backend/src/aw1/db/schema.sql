@@ -71,3 +71,21 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_preview TEXT NOT NULL,
     created_at  TEXT NOT NULL
 );
+
+-- Panel admin: perfiles de Telegram. Cada perfil ES un bot de Telegram
+-- independiente (su propio token de BotFather), alimentado desde el panel
+-- admin. El id es un uuid generado en la app (no autoincrement) porque
+-- aparece en la URL publica del webhook (/api/telegram/webhook/{id}),
+-- igual que conversations.id.
+CREATE TABLE IF NOT EXISTS telegram_profiles (
+    id              TEXT PRIMARY KEY,
+    label           TEXT NOT NULL,
+    bot_token       TEXT NOT NULL,
+    bot_token_hash  TEXT NOT NULL UNIQUE,
+    bot_username    TEXT NOT NULL DEFAULT '',
+    webhook_secret  TEXT NOT NULL,
+    system_prompt   TEXT NOT NULL DEFAULT '',
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);

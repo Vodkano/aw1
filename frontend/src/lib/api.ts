@@ -15,6 +15,8 @@ import type {
   SavedItem,
   Status,
   StoreInfo,
+  TelegramProfileDetail,
+  TelegramProfileSummary,
 } from "../types";
 
 const TOKEN_KEY = "aw1-token";
@@ -259,4 +261,34 @@ export const admin = {
     }),
   deleteApiKey: (id: number) =>
     adminRequest<void>(`/api/admin/api-keys/${id}`, { method: "DELETE" }),
+
+  telegramProfiles: () =>
+    adminRequest<TelegramProfileSummary[]>("/api/admin/telegram-profiles"),
+  telegramProfile: (id: string) =>
+    adminRequest<TelegramProfileDetail>(`/api/admin/telegram-profiles/${id}`),
+  createTelegramProfile: (body: { label: string; bot_token: string; system_prompt: string }) =>
+    adminRequest<TelegramProfileDetail>("/api/admin/telegram-profiles", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateTelegramProfile: (
+    id: string,
+    body: { label: string; bot_token: string; system_prompt: string; enabled: boolean },
+  ) =>
+    adminRequest<TelegramProfileDetail>(`/api/admin/telegram-profiles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteTelegramProfile: (id: string) =>
+    adminRequest<void>(`/api/admin/telegram-profiles/${id}`, { method: "DELETE" }),
+  testTelegramToken: (value: string) =>
+    adminRequest<{ ok: boolean; detail: string }>("/api/admin/telegram-profiles/test-token", {
+      method: "POST",
+      body: JSON.stringify({ value }),
+    }),
+  generatePrompt: (description: string) =>
+    adminRequest<{ system_prompt: string }>("/api/admin/telegram-profiles/generate-prompt", {
+      method: "POST",
+      body: JSON.stringify({ description }),
+    }),
 };

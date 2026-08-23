@@ -16,6 +16,7 @@ from ..core import llm_provider
 from ..core.api_keys_store import ApiKeyStore
 from ..core.ratelimit import RateLimiter
 from ..core.secrets_store import SecretsStore
+from ..core.telegram_profiles_store import TelegramProfileStore
 from ..db import create_repository
 from ..db.postgres_repository import PostgresRepository
 from ..db.repository import Repository
@@ -24,6 +25,8 @@ from ..llm.groq_client import GroqClient
 from ..llm.judges import Judges
 from ..pricing.pipeline import PricePipeline
 from ..settings import Settings
+from ..telegram.client import TelegramClient
+from ..telegram.orchestrator import TelegramOrchestrator
 
 
 def _build_llm_client(settings: Settings, secrets: SecretsStore) -> OllamaClient | GroqClient:
@@ -55,6 +58,9 @@ class Container:
     limiter: RateLimiter
     secrets: SecretsStore
     api_keys: ApiKeyStore
+    telegram_client: TelegramClient
+    telegram_profiles: TelegramProfileStore
+    telegram: TelegramOrchestrator
 
     @classmethod
     async def build(cls, settings: Settings) -> Container:
@@ -63,7 +69,9 @@ class Container:
 
         secrets = SecretsStore(repo)
         api_keys = ApiKeyStore(repo)
-        await asyncio.gather(secrets.load(), api_keys.load())
+        telegram_client = TelegramClient()
+        telegram_profiles = TelegramProfileStore(repo, telegram_client, settings)
+        await asyncio.gather(secrets.load(), api_keys.load(), telegram_profiles.load())
 
         llm = _build_llm_client(settings, secrets)
         judges = Judges(
@@ -81,11 +89,15 @@ class Container:
             settings=settings, repository=repo, llm=llm, judges=judges,
             wikipedia=wikipedia, secrets=secrets, tools=tools,
         )
+        telegram = TelegramOrchestrator(
+            profiles=telegram_profiles, client=telegram_client, chat=chat
+        )
         return cls(
             settings=settings, repo=repo, llm=llm, judges=judges, browser=browser,
             wikipedia=wikipedia, chat=chat, prices=prices, tools=tools,
             limiter=RateLimiter(settings.rate_limit_per_minute),
-            secrets=secrets, api_keys=api_keys,
+            secrets=secrets, api_keys=api_keys, telegram_client=telegram_client,
+            telegram_profiles=telegram_profiles, telegram=telegram,
         )
 
     async def reload_llm(self) -> None:
@@ -99,6 +111,8 @@ class Container:
         await old_llm.aclose()
 
     async def aclose(self) -> None:
+        await self.telegram.aclose()
+        await self.telegram_client.aclose()
         await self.browser.stop()
         await self.wikipedia.aclose()
         await self.llm.aclose()

@@ -130,6 +130,13 @@ class Settings(BaseSettings):
     max_history_turns: int = Field(default=10, ge=0, le=50)
     max_saved_items: int = Field(default=500, ge=1)
 
+    # -- Telegram -------------------------------------------------------------
+    # URL publica y estable de esta instancia (ej. https://app.aw1s.online),
+    # para construir la webhook URL de cada perfil al llamar Telegram
+    # setWebhook. Sin esto no se puede crear un perfil de Telegram -falla
+    # explicito al crear, no en silencio (ver core/telegram_profiles_store.py).
+    public_base_url: str = ""
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _split(cls, value: object) -> object:

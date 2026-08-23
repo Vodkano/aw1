@@ -39,7 +39,7 @@ from ..db.repository import Repository
 from ..llm.client import OllamaClient
 from ..llm.groq_client import GroqClient
 from ..llm.judges import Judges
-from ..llm.prompts import CHAT_SYSTEM, wrap_untrusted
+from ..llm.prompts import CHAT_SYSTEM, GPT_SYSTEM, wrap_untrusted
 from ..settings import Settings
 from . import heuristics, memory
 from .events import ChatEvent
@@ -111,11 +111,7 @@ class ChatService:
         self._llm = client
 
     def _openai_key(self) -> str:
-        override = self._secrets.get("openai_api_key")
-        if override:
-            return override
-        key = self._settings.openai_api_key
-        return key.get_secret_value() if key else ""
+        return llm_provider.openai_key(self._settings, self._secrets)
 
     def gpt_configured(self) -> bool:
         return bool(self._openai_key().strip())
@@ -129,6 +125,7 @@ class ChatService:
         message: str,
         *,
         conversation_id: str | None = None,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[ChatEvent]:
         clean = " ".join(str(message or "").split())
         if not clean:
@@ -209,7 +206,8 @@ class ChatService:
         if wants_gpt:
             if self.gpt_configured():
                 async for event in self._answer_with_gpt(
-                    conversation, clean, history, context_block, sources
+                    conversation, clean, history, context_block, sources,
+                    system_prompt=system_prompt,
                 ):
                     yield event
                 return
@@ -224,7 +222,8 @@ class ChatService:
             )
 
         async for event in self._answer_with_ollama(
-            conversation, clean, history, context_block, sources
+            conversation, clean, history, context_block, sources,
+            system_prompt=system_prompt,
         ):
             yield event
 
@@ -279,8 +278,10 @@ class ChatService:
         history: list[dict[str, str]],
         context_block: str,
         sources: list[str],
+        *,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[ChatEvent]:
-        messages = [{"role": "system", "content": CHAT_SYSTEM}]
+        messages = [{"role": "system", "content": system_prompt or CHAT_SYSTEM}]
         messages.extend(history)
         user_content = f"{context_block}\n\n{message}" if context_block else message
         messages.append({"role": "user", "content": user_content})
@@ -333,20 +334,15 @@ class ChatService:
         history: list[dict[str, str]],
         context_block: str = "",
         sources: list[str] | None = None,
+        *,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[ChatEvent]:
         sources = sources or []
         user_content = f"{context_block}\n\n{message}" if context_block else message
         payload = {
             "model": self._settings.openai_model,
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Eres el modo externo de AW1, usado para preguntas que se "
-                        "benefician de un modelo mas fuerte. Responde en espanol, breve "
-                        "y con datos verificables. Si no tienes certeza, dilo."
-                    ),
-                },
+                {"role": "system", "content": system_prompt or GPT_SYSTEM},
                 *history,
                 {"role": "user", "content": user_content},
             ],

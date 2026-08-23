@@ -13,11 +13,23 @@ from __future__ import annotations
 from ..settings import Settings
 from .secrets_store import SecretsStore
 
-__all__ = ["effective_provider", "chat_model", "judge_model"]
+__all__ = ["chat_model", "effective_provider", "judge_model", "openai_key"]
 
 
 def effective_provider(settings: Settings, secrets: SecretsStore) -> str:
     return secrets.get("llm_provider") or settings.llm_provider
+
+
+def openai_key(settings: Settings, secrets: SecretsStore) -> str:
+    """La clave de OpenAI resuelta (panel admin primero, entorno despues).
+    GPT es un proveedor aparte -no participa de effective_provider- pero
+    varios lugares necesitan esta misma resolucion (ChatService, el
+    generador de prompts de perfiles de Telegram): una sola definicion."""
+    override = secrets.get("openai_api_key")
+    if override:
+        return override
+    key = settings.openai_api_key
+    return key.get_secret_value() if key else ""
 
 
 def chat_model(settings: Settings, secrets: SecretsStore) -> str:

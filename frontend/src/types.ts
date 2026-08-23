@@ -133,6 +133,22 @@ export interface ApiKeyCreated extends ApiKeySummary {
   value: string;
 }
 
+export interface TelegramProfileSummary {
+  id: string;
+  label: string;
+  bot_username: string;
+  token_preview: string;
+  system_prompt: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TelegramProfileDetail extends TelegramProfileSummary {
+  bot_token: string;
+  webhook_registered: boolean;
+}
+
 export interface AdminStatus {
   llm_provider: string;
   llm_model: string;
