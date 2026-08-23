@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..pricing.pipeline import MAX_QUERY_LENGTH
+
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -18,7 +20,7 @@ class ChatRequest(BaseModel):
 class PriceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1, max_length=180)
+    query: str = Field(min_length=1, max_length=MAX_QUERY_LENGTH)
     stores: list[str] = Field(default_factory=list, max_length=12)
     refresh: bool = False
 

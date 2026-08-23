@@ -11,14 +11,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from ...llm.schemas import ChatRoute
-from ...pricing.pipeline import PricePipeline
+from ...pricing.pipeline import MAX_QUERY_LENGTH, PricePipeline
 from ..events import ChatEvent
 from .base import ChatTool
-
-# Debe calzar con PriceRequest.query (api/schemas.py): el pipeline no
-# recorta solo, y route.search_terms para intent="precio" es el mensaje
-# completo canonicalizado, no un nombre de producto ya extraido.
-MAX_QUERY_LENGTH = 180
 
 
 class PriceSearchTool(ChatTool):
@@ -32,7 +27,15 @@ class PriceSearchTool(ChatTool):
     async def run(
         self, route: ChatRoute, message: str, conversation_id: str
     ) -> AsyncIterator[ChatEvent]:
+        # route.search_terms para intent="precio" es el mensaje completo
+        # canonicalizado (heuristics.merge lo deja intacto), no un nombre de
+        # producto ya extraido -de ahi el recorte defensivo.
         query = (route.search_terms or message).strip()[:MAX_QUERY_LENGTH]
+        # Se manda aparte del propio evento "start" del pipeline porque en un
+        # resultado desde cache ese evento nunca llega (el pipeline salta
+        # directo a "done") y la tarjeta necesita la query igual para el
+        # boton "ver todas las ofertas".
+        yield ChatEvent("tool_event", {"tool": "prices", "type": "query", "data": {"query": query}})
         comparison: dict | None = None
         async for event in self._pipeline.run(query):
             yield ChatEvent(

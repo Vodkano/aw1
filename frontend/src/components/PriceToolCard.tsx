@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { ExternalLink, Sparkles } from "lucide-react";
+import { ExternalLink, Search, Sparkles } from "lucide-react";
 import { STATUS_STYLE, STATUS_TEXT } from "../lib/priceSearch";
 import { clp } from "../lib/format";
 import type { PriceToolState } from "../types";
@@ -59,13 +59,13 @@ export function PriceToolCard({
               Ir a la tienda
               <ExternalLink className="size-3" />
             </a>
-            {offers.length > 1 && (
+            {!running && (
               <button
                 type="button"
                 onClick={() => onOpenFull(state.query)}
                 className="chip hover:text-[var(--text)]"
               >
-                Ver {offers.length} ofertas
+                {offers.length > 1 ? `Ver ${offers.length} ofertas` : "Ver en Precios"}
               </button>
             )}
           </div>
@@ -81,6 +81,20 @@ export function PriceToolCard({
 
       {running && !best && (
         <p className="text-[12.5px] muted">Recorriendo tiendas…</p>
+      )}
+
+      {/* Escape hatch siempre disponible al terminar sin ningun resultado -la
+          pestana Precios trae mas opciones (elegir tiendas, reintentar) que
+          esta tarjeta compacta no ofrece. */}
+      {!running && !best && (
+        <button
+          type="button"
+          onClick={() => onOpenFull(state.query)}
+          className="chip hover:text-[var(--text)]"
+        >
+          <Search className="size-3" />
+          Buscar en Precios
+        </button>
       )}
     </div>
   );

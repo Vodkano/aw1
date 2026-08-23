@@ -14,7 +14,7 @@ import re
 
 from ..db.postgres_repository import PostgresRepository
 from ..db.repository import Repository
-from ..llm.prompts import SAVED_NOTES_NOTICE
+from ..llm.prompts import SAVED_NOTES_NOTICE, wrap_untrusted
 from ..llm.schemas import ChatRoute
 
 MIN_KEYWORD_LEN = 3
@@ -42,4 +42,4 @@ async def recall(repo: Repository | PostgresRepository, route: ChatRoute, messag
     if not items:
         return ""
     lines = "\n".join(f"- {item['text'][:MAX_ITEM_CHARS]}" for item in items)
-    return f"{SAVED_NOTES_NOTICE}\n<<<DATOS>>>\n{lines}\n<<<FIN>>>"
+    return wrap_untrusted(SAVED_NOTES_NOTICE, lines)

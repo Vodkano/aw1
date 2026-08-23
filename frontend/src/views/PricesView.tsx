@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   Search,
@@ -13,36 +13,27 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { clp, hostname, money, plural, seconds } from "../lib/format";
-import type { Comparison, Offer, SearchPlan, StoreInfo, StoreOutcome } from "../types";
+import { STATUS_STYLE, STATUS_TEXT, initialPriceToolState, reducePriceEvent } from "../lib/priceSearch";
+import type { Offer, PriceToolState, StoreInfo } from "../types";
 
 type Phase = "idle" | "running" | "done" | "error";
 
-const STATUS_STYLE: Record<string, string> = {
-  ok: "bg-accent-500",
-  vacio: "bg-ink-300",
-  error: "bg-red-400",
-  timeout: "bg-amber-400",
-  running: "bg-accent-400 animate-pulse-soft",
-  pending: "bg-ink-200",
-};
-
-const STATUS_TEXT: Record<string, string> = {
-  ok: "listo",
-  vacio: "sin resultados",
-  error: "error",
-  timeout: "sin tiempo",
-  running: "buscando",
-  pending: "en cola",
-};
+// Envuelve reducePriceEvent (compartido con la tarjeta de precios del chat,
+// ver lib/priceSearch.ts) con una accion extra de reset propia de esta
+// vista -el chat nunca reinicia una busqueda a medio camino, esta vista si
+// (cada Buscar/Volver a buscar empieza de cero).
+function priceViewReducer(
+  state: PriceToolState,
+  action: { type: string; data: any },
+): PriceToolState {
+  if (action.type === "reset") return initialPriceToolState(action.data.query as string);
+  return reducePriceEvent(state, action.type, action.data);
+}
 
 export function PricesView({ initialQuery }: { initialQuery?: string }) {
   const [query, setQuery] = useState(initialQuery ?? "");
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [plan, setPlan] = useState<SearchPlan | null>(null);
-  const [stores, setStores] = useState<StoreOutcome[]>([]);
-  const [live, setLive] = useState<Offer[]>([]);
-  const [result, setResult] = useState<Comparison | null>(null);
-  const [error, setError] = useState("");
+  const [started, setStarted] = useState(false);
+  const [state, dispatch] = useReducer(priceViewReducer, initialPriceToolState(initialQuery ?? ""));
   const [catalog, setCatalog] = useState<StoreInfo[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [showStores, setShowStores] = useState(false);
@@ -61,12 +52,8 @@ export function PricesView({ initialQuery }: { initialQuery?: string }) {
       const controller = new AbortController();
       abort.current = controller;
 
-      setPhase("running");
-      setError("");
-      setPlan(null);
-      setStores([]);
-      setLive([]);
-      setResult(null);
+      setStarted(true);
+      dispatch({ type: "reset", data: { query: clean } });
       setShowDetail(false);
 
       try {
@@ -74,85 +61,20 @@ export function PricesView({ initialQuery }: { initialQuery?: string }) {
           { query: clean, stores: selected, refresh },
           {
             signal: controller.signal,
-            onEvent: (type, data) => {
-              switch (type) {
-                case "start":
-                  setStores(
-                    (data.stores as string[]).map((name: string) => ({
-                      slug: name,
-                      name,
-                      search_url: "",
-                      cards_found: 0,
-                      picked: 0,
-                      offers: 0,
-                      elapsed: 0,
-                      status: "pending" as const,
-                      detail: "",
-                    })),
-                  );
-                  break;
-                case "plan":
-                  setPlan(data);
-                  break;
-                case "store_start":
-                  setStores((current) =>
-                    current.map((item) =>
-                      item.name === data.name || item.slug === data.slug
-                        ? { ...item, slug: data.slug, status: "running", search_url: data.url }
-                        : item,
-                    ),
-                  );
-                  break;
-                case "store_cards":
-                  setStores((current) =>
-                    current.map((item) =>
-                      item.slug === data.slug ? { ...item, cards_found: data.found } : item,
-                    ),
-                  );
-                  break;
-                case "store_picked":
-                  setStores((current) =>
-                    current.map((item) =>
-                      item.slug === data.slug ? { ...item, picked: data.picked.length } : item,
-                    ),
-                  );
-                  break;
-                case "offer":
-                  setLive((current) =>
-                    [...current, data.offer as Offer].sort((a, b) => a.price_clp - b.price_clp),
-                  );
-                  break;
-                case "store_done":
-                  setStores((current) =>
-                    current.map((item) =>
-                      item.slug === data.store.slug ? (data.store as StoreOutcome) : item,
-                    ),
-                  );
-                  break;
-                case "done":
-                  setResult(data.comparison as Comparison);
-                  setPhase("done");
-                  break;
-                case "error":
-                  setError(data.message);
-                  setPhase("error");
-                  break;
-              }
-            },
+            onEvent: (type, data) => dispatch({ type, data }),
           },
         );
       } catch (issue) {
         if ((issue as Error).name !== "AbortError") {
-          setError((issue as Error).message);
-          setPhase("error");
-        } else if (!result) {
-          setPhase("idle");
+          dispatch({ type: "error", data: { message: (issue as Error).message } });
+        } else if (!state.comparison) {
+          setStarted(false);
         }
       } finally {
         abort.current = null;
       }
     },
-    [selected, result],
+    [selected, state.comparison],
   );
 
   useEffect(() => {
@@ -164,8 +86,15 @@ export function PricesView({ initialQuery }: { initialQuery?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQuery]);
 
-  const offers = result?.offers ?? live;
+  const { plan, stores, error } = state;
+  const result = state.comparison;
+  const offers = result?.offers ?? state.offers;
   const best = offers[0];
+  const phase: Phase = !started
+    ? "idle"
+    : state.phase === "done" || state.phase === "error"
+      ? state.phase
+      : "running";
   const running = phase === "running";
 
   return (

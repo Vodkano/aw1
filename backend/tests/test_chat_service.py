@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from unittest.mock import patch
 
 import pytest
 
@@ -97,6 +98,24 @@ async def test_a_failing_tool_falls_back_to_a_system_message(repo, test_settings
     assert "problema" in done.data["answer"].lower()
 
 
+async def test_a_provider_mention_preempts_tool_dispatch_from_the_detected_intent(
+    repo, test_settings
+):
+    """Bug real encontrado en revision: "@gpt cuanto cuesta X" clasificaba
+    como intent="precio" y la herramienta de precios se lo comia entero,
+    dejando la mencion "@gpt" sin ningun efecto. Un mention de PROVEEDOR
+    (gpt/ollama) no debe caer al intent detectado como si no existiera."""
+    tool = DummyTool()
+    tool.intent = "precio"
+    service, _ = await _build_service(repo, test_settings, tool)
+
+    events = await _collect(service.stream("@gpt cuanto cuesta un iphone 15?"))
+    assert tool.calls == [], "la herramienta de precios no deberia haber corrido"
+    assert any(event.type == "notice" for event in events), (
+        "deberia haber intentado GPT (y avisar que no esta configurado en la prueba)"
+    )
+
+
 # --- menciones ----------------------------------------------------------------
 def test_extract_mention_finds_a_known_id_anywhere_in_the_message():
     cleaned, mention = ChatService._extract_mention(
@@ -110,6 +129,27 @@ def test_extract_mention_ignores_an_unknown_at_token():
     cleaned, mention = ChatService._extract_mention("mi correo es @juan", {"gpt", "ollama"})
     assert cleaned == "mi correo es @juan"
     assert mention is None
+
+
+def test_extract_mention_ignores_an_at_glued_to_other_text():
+    """Bug real: "contacto@ollama.dev" no es una mencion -el "@" pertenece a
+    un correo, no viene despues de un espacio o al inicio del mensaje."""
+    cleaned, mention = ChatService._extract_mention(
+        "mi correo es contacto@ollama.dev, escribeme", {"gpt", "ollama"}
+    )
+    assert mention is None
+    assert cleaned == "mi correo es contacto@ollama.dev, escribeme"
+
+
+def test_extract_mention_skips_an_unknown_token_and_finds_a_later_valid_one():
+    """Bug real: antes solo se miraba el primer "@algo" del mensaje; si ese
+    no era valido (ej. un correo), una mencion real mas adelante se ignoraba
+    por completo."""
+    cleaned, mention = ChatService._extract_mention(
+        "escribime a juan@empresa.cl y busca @gpt esto", {"gpt", "ollama"}
+    )
+    assert mention == "gpt"
+    assert cleaned == "escribime a juan@empresa.cl y busca esto"
 
 
 async def test_gpt_mention_forces_gpt_even_when_not_heavy(repo, test_settings):
@@ -138,6 +178,56 @@ async def test_ollama_mention_forces_local_even_when_heavy(repo, test_settings):
     assert not any(event.type == "notice" for event in events)
 
 
+class FakeWikipedia:
+    """Evita golpear la Wikipedia real en la prueba."""
+
+    async def lookup(self, term: str) -> tuple[str, str] | None:
+        return f"Extracto sobre {term}.", "https://es.wikipedia.org/wiki/Prueba"
+
+
+async def test_gpt_mention_on_a_biography_keeps_the_wikipedia_citation(repo, tmp_path):
+    """Bug real encontrado en revision: _answer_with_gpt mandaba "sources": []
+    fijo en el evento "done" -si "@gpt" fuerza GPT en una biografia, la cita
+    de Wikipedia (ya calculada y emitida como evento "source") se perdia en
+    el mensaje final. Prueba directa de _answer_with_gpt (con httpx.AsyncClient
+    simulado, sin red real) para confirmar que ahora se le pasa y aparece."""
+    fake = FakeOllama(online=True)
+    judges = Judges(fake, model="mistral", timeout=5)
+    settings = Settings(_env_file=None, env="test", data_dir=tmp_path, openai_api_key="sk-test")
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    service = ChatService(
+        settings=settings, repository=repo, llm=fake, judges=judges,
+        wikipedia=FakeWikipedia(), secrets=secrets, tools=ToolRegistry([]),
+    )
+
+    class FakeResponse:
+        status_code = 200
+
+        async def aiter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"Ada Lovelace fue pionera."}}]}'
+            yield "data: [DONE]"
+
+    class FakeStreamCtx:
+        async def __aenter__(self) -> FakeResponse:
+            return FakeResponse()
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+    with patch("httpx.AsyncClient.stream", return_value=FakeStreamCtx()):
+        events = [
+            event
+            async for event in service._answer_with_gpt(
+                "conv1", "quien fue Ada Lovelace", [], "contexto de wikipedia",
+                ["https://es.wikipedia.org/wiki/Prueba"],
+            )
+        ]
+    done = next(event for event in events if event.type == "done")
+    assert done.data["source"] == "gpt"
+    assert done.data["sources"] == ["https://es.wikipedia.org/wiki/Prueba"]
+
+
 # --- memoria de largo plazo, solo lectura --------------------------------------
 async def test_memory_recall_is_included_for_charla(repo, test_settings):
     await repo.save_item("El auto de Pedro es un Toyota Corolla 2020, patente ABCD12.")
@@ -157,6 +247,18 @@ async def test_memory_recall_is_skipped_for_actualidad(repo, test_settings):
     assert "950 pesos" not in fake.chat_calls[-1]
 
 
+async def test_a_memory_recall_failure_does_not_crash_the_chat(repo, test_settings):
+    """Bug real: memory.recall() no tenia manejo de errores, a diferencia de
+    todo lo demas que puede fallar en este archivo (_safe_route, el cliente
+    de Ollama, GPT). Un problema puntual de la base no deberia tumbar el
+    turno entero -debe degradar a responder sin ese contexto."""
+    service, fake = await _build_service(repo, test_settings, None)
+    with patch.object(repo, "search_items", side_effect=RuntimeError("db caida")):
+        events = await _collect(service.stream("hola, como estas?"))
+    assert any(event.type == "done" for event in events)
+    assert fake.chat_calls
+
+
 # --- search_items en el repositorio --------------------------------------------
 async def test_search_items_matches_keywords_case_insensitively(repo):
     await repo.save_item("Receta de Empanadas de Pino")
@@ -170,3 +272,15 @@ async def test_search_items_matches_keywords_case_insensitively(repo):
 async def test_search_items_with_no_keywords_returns_nothing(repo):
     await repo.save_item("algo")
     assert await repo.search_items([]) == []
+
+
+async def test_search_items_escapes_sql_wildcards_in_keywords(repo):
+    """Bug real: un keyword con guion bajo (ej. "rtx_4090", que el regex de
+    palabras de memory.py extrae sin problema) se usaba tal cual en un LIKE
+    sin escapar -el "_" es comodin de un caracter en SQL, asi que matcheaba
+    de mas ("rtxx4090" tambien calzaba)."""
+    await repo.save_item("Notebook con rtx_4090 en oferta")
+    await repo.save_item("Notebook con rtxx4090 (typo, no deberia matchear)")
+
+    found = await repo.search_items(["rtx_4090"])
+    assert [item["text"] for item in found] == ["Notebook con rtx_4090 en oferta"]

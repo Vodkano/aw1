@@ -39,6 +39,19 @@ def _rowcount(status: str) -> int:
     return int(parts[-1]) if parts and parts[-1].isdigit() else 0
 
 
+def _item_from_row(row: asyncpg.Record) -> dict[str, Any]:
+    return {
+        "id": row["id"], "text": row["text"], "source": row["source"],
+        "kind": row["kind"], "meta": json.loads(row["meta"]),
+        "created_at": _parse(row["created_at"]),
+    }
+
+
+def _escape_like(value: str) -> str:
+    """Ver repository.py:_escape_like -mismo motivo, misma logica."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class PostgresRepository:
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
@@ -200,14 +213,7 @@ class PostgresRepository:
             "ORDER BY id DESC LIMIT $1 OFFSET $2",
             limit, offset,
         )
-        return [
-            {
-                "id": row["id"], "text": row["text"], "source": row["source"],
-                "kind": row["kind"], "meta": json.loads(row["meta"]),
-                "created_at": _parse(row["created_at"]),
-            }
-            for row in rows
-        ]
+        return [_item_from_row(row) for row in rows]
 
     async def search_items(self, keywords: list[str], limit: int = 5) -> list[dict[str, Any]]:
         """Ver Repository.search_items (db/repository.py): misma logica, LIKE
@@ -215,21 +221,16 @@ class PostgresRepository:
         SQLite (Postgres no es case-insensitive por defecto)."""
         if not keywords:
             return []
-        clauses = " OR ".join(f"LOWER(text) LIKE ${index + 1}" for index in range(len(keywords)))
-        params = [f"%{keyword}%" for keyword in keywords]
+        clauses = " OR ".join(
+            f"LOWER(text) LIKE ${index + 1} ESCAPE '\\'" for index in range(len(keywords))
+        )
+        params = [f"%{_escape_like(keyword)}%" for keyword in keywords]
         rows = await self._conn.fetch(
             f"SELECT id, text, source, kind, meta, created_at FROM saved_items "  # noqa: S608
             f"WHERE {clauses} ORDER BY id DESC LIMIT ${len(keywords) + 1}",
             *params, limit,
         )
-        return [
-            {
-                "id": row["id"], "text": row["text"], "source": row["source"],
-                "kind": row["kind"], "meta": json.loads(row["meta"]),
-                "created_at": _parse(row["created_at"]),
-            }
-            for row in rows
-        ]
+        return [_item_from_row(row) for row in rows]
 
     async def count_items(self) -> int:
         return int(await self._conn.fetchval("SELECT COUNT(*) FROM saved_items") or 0)

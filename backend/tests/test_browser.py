@@ -31,6 +31,18 @@ def test_parse_proxy_rejects_an_unparsable_value():
     assert _parse_proxy("no es una url") is None
 
 
+def test_parse_proxy_decodes_percent_encoded_credentials():
+    """Bug real: urlsplit no decodifica -una clave con "@" o "%" (obligatorio
+    percent-encoded en la URL) llegaba literal a Playwright y la
+    autenticacion contra el proxy fallaba."""
+    proxy = _parse_proxy("http://svc:p%40ss@proxy.example.com:8080")
+    assert proxy == {
+        "server": "http://proxy.example.com:8080",
+        "username": "svc",
+        "password": "p@ss",
+    }
+
+
 def test_the_search_page_has_no_products_in_the_raw_html(store: FakeStore):
     """Verifica la premisa: sin navegador no hay nada que extraer."""
     from urllib.request import urlopen

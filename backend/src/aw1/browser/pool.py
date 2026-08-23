@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
@@ -210,10 +210,13 @@ def _parse_proxy(url: str) -> dict[str, str] | None:
         return None
     port = f":{parsed.port}" if parsed.port else ""
     proxy: dict[str, str] = {"server": f"{parsed.scheme}://{parsed.hostname}{port}"}
+    # urlsplit no decodifica: una clave con "@"/"%" percent-encoded (obligatorio
+    # en la URL si el caracter literal es reservado) llegaria a Playwright tal
+    # cual, sin decodificar, y la autenticacion contra el proxy fallaria.
     if parsed.username:
-        proxy["username"] = parsed.username
+        proxy["username"] = unquote(parsed.username)
     if parsed.password:
-        proxy["password"] = parsed.password
+        proxy["password"] = unquote(parsed.password)
     return proxy
 
 

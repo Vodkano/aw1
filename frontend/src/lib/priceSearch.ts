@@ -34,6 +34,12 @@ export function reducePriceEvent(
   data: any,
 ): PriceToolState {
   switch (type) {
+    // Solo lo manda la herramienta de precios del chat (ver chat/tools/prices.py),
+    // antes que nada mas: en un resultado desde cache el pipeline nunca emite
+    // "start" (que es de donde normalmente sale la query), asi que sin este
+    // caso la tarjeta se queda sin saber que se busco.
+    case "query":
+      return { ...state, query: data.query as string };
     case "start":
       return {
         ...state,

@@ -32,6 +32,21 @@ def _parse(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _item_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "text": row["text"], "source": row["source"],
+        "kind": row["kind"], "meta": json.loads(row["meta"]),
+        "created_at": _parse(row["created_at"]),
+    }
+
+
+def _escape_like(value: str) -> str:
+    """Escapa los comodines de LIKE (%, _) para que un keyword literal no se
+    interprete como patron -si no, una palabra con guion bajo (ej. de un
+    modelo "rtx_4090") matchearia de mas ("rtxA4090" tambien calzaria)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class Repository:
     def __init__(self, path: Path | str) -> None:
         self._path = Path(path)
@@ -218,14 +233,7 @@ class Repository:
         )
         rows = await cursor.fetchall()
         await cursor.close()
-        return [
-            {
-                "id": row["id"], "text": row["text"], "source": row["source"],
-                "kind": row["kind"], "meta": json.loads(row["meta"]),
-                "created_at": _parse(row["created_at"]),
-            }
-            for row in rows
-        ]
+        return [_item_from_row(row) for row in rows]
 
     async def search_items(self, keywords: list[str], limit: int = 5) -> list[dict[str, Any]]:
         """Coincidencia simple por palabras clave, sin busqueda semantica -de
@@ -236,8 +244,8 @@ class Repository:
         """
         if not keywords:
             return []
-        clauses = " OR ".join(["LOWER(text) LIKE ?"] * len(keywords))
-        params = [f"%{keyword}%" for keyword in keywords]
+        clauses = " OR ".join(["LOWER(text) LIKE ? ESCAPE '\\'"] * len(keywords))
+        params = [f"%{_escape_like(keyword)}%" for keyword in keywords]
         cursor = await self._conn.execute(
             f"SELECT id, text, source, kind, meta, created_at FROM saved_items "  # noqa: S608
             f"WHERE {clauses} ORDER BY id DESC LIMIT ?",
@@ -245,14 +253,7 @@ class Repository:
         )
         rows = await cursor.fetchall()
         await cursor.close()
-        return [
-            {
-                "id": row["id"], "text": row["text"], "source": row["source"],
-                "kind": row["kind"], "meta": json.loads(row["meta"]),
-                "created_at": _parse(row["created_at"]),
-            }
-            for row in rows
-        ]
+        return [_item_from_row(row) for row in rows]
 
     async def count_items(self) -> int:
         cursor = await self._conn.execute("SELECT COUNT(*) AS total FROM saved_items")
