@@ -58,9 +58,14 @@ class TelegramProfileStore:
 
     async def get(self, profile_id: str) -> dict[str, Any] | None:
         """Fila completa (con el token) -para el formulario de edicion de
-        UN perfil puntual, no para listados."""
+        UN perfil puntual, no para listados. Le suma token_preview (que
+        TelegramProfileDetail exige via TelegramProfileSummary) y
+        webhook_registered, que la fila cruda de la base no trae -son
+        campos calculados, no columnas."""
         row = await self._repo.get_telegram_profile(profile_id)
-        return row
+        if row is None:
+            return None
+        return {**row, **_summary(row), "bot_token": row["bot_token"], "webhook_registered": True}
 
     async def test_token(self, bot_token: str) -> dict[str, Any]:
         """Dict {ok, detail}, no un modelo de la capa API -mismo criterio

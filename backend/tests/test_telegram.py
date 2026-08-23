@@ -134,6 +134,21 @@ async def test_create_rejects_a_token_telegram_does_not_recognize(repo, telegram
         await store.create(label="Bot", bot_token="bad-token", system_prompt="")
 
 
+async def test_get_returns_a_row_the_admin_api_schema_accepts(repo, telegram_settings):
+    """Bug real: get() devolvia la fila cruda de la base, sin token_preview
+    -un campo calculado que TelegramProfileDetail exige (via
+    TelegramProfileSummary) y que rompia GET /telegram-profiles/{id} con un
+    error de validacion apenas se intentaba abrir un perfil ya creado."""
+    from aw1.api.schemas import TelegramProfileDetail
+
+    store = TelegramProfileStore(repo, FakeTelegramClient(), telegram_settings)
+    created = await store.create(label="Bot", bot_token="123:ABC", system_prompt="hola")
+
+    detail = await store.get(created["id"])
+    assert detail is not None
+    TelegramProfileDetail(**detail)  # no debe lanzar
+
+
 async def test_create_requires_a_public_base_url(repo, tmp_path):
     settings = Settings(_env_file=None, env="test", data_dir=tmp_path)
     store = TelegramProfileStore(repo, FakeTelegramClient(), settings)
