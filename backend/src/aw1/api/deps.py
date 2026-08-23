@@ -9,6 +9,8 @@ from fastapi import Request
 
 from ..browser.pool import BrowserPool
 from ..chat.service import ChatService
+from ..chat.tools.base import ToolRegistry
+from ..chat.tools.prices import PriceSearchTool
 from ..chat.wikipedia import Wikipedia
 from ..core import llm_provider
 from ..core.api_keys_store import ApiKeyStore
@@ -49,6 +51,7 @@ class Container:
     wikipedia: Wikipedia
     chat: ChatService
     prices: PricePipeline
+    tools: ToolRegistry
     limiter: RateLimiter
     secrets: SecretsStore
     api_keys: ApiKeyStore
@@ -70,16 +73,17 @@ class Container:
         browser = BrowserPool(settings)
         wikipedia = Wikipedia()
 
-        chat = ChatService(
-            settings=settings, repository=repo, llm=llm, judges=judges,
-            wikipedia=wikipedia, secrets=secrets,
-        )
         prices = PricePipeline(
             settings=settings, browser=browser, judges=judges, repository=repo
         )
+        tools = ToolRegistry([PriceSearchTool(prices)])
+        chat = ChatService(
+            settings=settings, repository=repo, llm=llm, judges=judges,
+            wikipedia=wikipedia, secrets=secrets, tools=tools,
+        )
         return cls(
             settings=settings, repo=repo, llm=llm, judges=judges, browser=browser,
-            wikipedia=wikipedia, chat=chat, prices=prices,
+            wikipedia=wikipedia, chat=chat, prices=prices, tools=tools,
             limiter=RateLimiter(settings.rate_limit_per_minute),
             secrets=secrets, api_keys=api_keys,
         )

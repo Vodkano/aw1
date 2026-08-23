@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { ArrowUp, Check, Copy, Bookmark, ExternalLink, Square, RotateCcw } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import { Markdown } from "../components/Markdown";
-import type { ChatMessage, Source, Status } from "../types";
+import { MentionMenu } from "../components/MentionMenu";
+import { PriceToolCard } from "../components/PriceToolCard";
+import { initialPriceToolState, reducePriceEvent } from "../lib/priceSearch";
+import type { ChatMessage, Mention, Source, Status } from "../types";
 
 const CONVERSATION_KEY = "aw1-conversation";
 
@@ -18,7 +21,18 @@ const SOURCE_LABEL: Record<Source, string> = {
   wikipedia: "Wikipedia",
   gpt: "GPT",
   system: "Sistema",
+  prices: "Precios",
 };
+
+/** Texto entre el ultimo "@" (sin espacio despues) y el cursor, si hay uno. */
+function activeMentionQuery(text: string, caret: number): string | null {
+  const before = text.slice(0, caret);
+  const at = before.lastIndexOf("@");
+  if (at === -1) return null;
+  const fragment = before.slice(at + 1);
+  if (/\s/.test(fragment)) return null;
+  return fragment;
+}
 
 function newId() {
   return Math.random().toString(36).slice(2);
@@ -34,6 +48,8 @@ export function ChatView({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const [conversation, setConversation] = useState<string>(() => {
     try {
       return sessionStorage.getItem(CONVERSATION_KEY) ?? "";
@@ -45,6 +61,34 @@ export function ChatView({
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const hydrated = useRef(false);
+
+  // Al volver a esta pestana, ChatView se vuelve a montar de cero (App.tsx
+  // solo renderiza la vista activa) y pierde `messages` -pero el id de la
+  // conversacion sigue en sessionStorage. Se rehidrata desde el backend una
+  // sola vez, solo en la sesion del navegador (sessionStorage se limpia al
+  // cerrar la pestana).
+  useEffect(() => {
+    if (hydrated.current || !conversation) return;
+    hydrated.current = true;
+    api
+      .conversation(conversation)
+      .then((rows) =>
+        setMessages(
+          rows.map((row) => ({
+            id: newId(),
+            role: row.role as "user" | "assistant",
+            content: row.content,
+            source: row.role === "assistant" ? (row.source as Source) : undefined,
+            streaming: false,
+          })),
+        ),
+      )
+      .catch((error) => {
+        if (error instanceof ApiError && error.status === 404) remember("");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
@@ -112,6 +156,22 @@ export function ChatView({
                     setTimeout(() => onSearchPrices(data.query), 400);
                   }
                   break;
+                case "tool_event":
+                  setMessages((current) =>
+                    current.map((item) =>
+                      item.id === assistantId
+                        ? {
+                            ...item,
+                            toolCall: reducePriceEvent(
+                              item.toolCall ?? initialPriceToolState(data.data?.query ?? ""),
+                              data.type,
+                              data.data,
+                            ),
+                          }
+                        : item,
+                    ),
+                  );
+                  break;
                 case "notice":
                   setMessages((current) =>
                     current.map((item) =>
@@ -153,11 +213,37 @@ export function ChatView({
     [conversation, onSearchPrices, remember],
   );
 
+  const mentionItems = useMemo<Mention[]>(() => {
+    if (mentionQuery === null) return [];
+    const all = status?.mentions ?? [];
+    const query = mentionQuery.toLowerCase();
+    return all.filter((item) => item.label.toLowerCase().startsWith(query));
+  }, [mentionQuery, status?.mentions]);
+
+  const insertMention = (item: Mention) => {
+    const node = textarea.current;
+    if (!node) return;
+    const caret = node.selectionStart ?? draft.length;
+    const before = draft.slice(0, caret);
+    const at = before.lastIndexOf("@");
+    if (at === -1) return;
+    const next = `${draft.slice(0, at)}@${item.id} ${draft.slice(caret)}`;
+    setDraft(next);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      const pos = at + item.id.length + 2;
+      node.focus();
+      node.setSelectionRange(pos, pos);
+    });
+  };
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
+    if (mentionQuery !== null && mentionItems.length > 0) return; // Enter selecciona, no envia
     const text = draft.trim();
     if (!text || busy) return;
     setDraft("");
+    setMentionQuery(null);
     if (textarea.current) textarea.current.style.height = "auto";
     void send(text);
   };
@@ -200,7 +286,7 @@ export function ChatView({
           ) : (
             <div className="space-y-6">
               {messages.map((message) => (
-                <Bubble key={message.id} message={message} />
+                <Bubble key={message.id} message={message} onSearchPrices={onSearchPrices} />
               ))}
             </div>
           )}
@@ -208,7 +294,14 @@ export function ChatView({
       </div>
 
       <div className="px-5 pb-5 md:px-9 md:pb-7">
-        <form onSubmit={submit} className="mx-auto max-w-3xl">
+        <form onSubmit={submit} className="relative mx-auto max-w-3xl">
+          {mentionQuery !== null && mentionItems.length > 0 && (
+            <MentionMenu
+              items={mentionItems}
+              activeIndex={mentionIndex}
+              onSelect={insertMention}
+            />
+          )}
           <div className="card flex items-end gap-2 p-2 pl-4 transition-shadow focus-within:border-accent-500 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent-500)_16%,transparent)]">
             <textarea
               ref={textarea}
@@ -223,8 +316,33 @@ export function ChatView({
                 const node = event.target;
                 node.style.height = "auto";
                 node.style.height = `${Math.min(node.scrollHeight, 180)}px`;
+                const query = activeMentionQuery(node.value, node.selectionStart ?? node.value.length);
+                setMentionQuery(query);
+                setMentionIndex(0);
               }}
               onKeyDown={(event) => {
+                if (mentionQuery !== null && mentionItems.length > 0) {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setMentionIndex((index) => (index + 1) % mentionItems.length);
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setMentionIndex((index) => (index - 1 + mentionItems.length) % mentionItems.length);
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === "Tab") {
+                    event.preventDefault();
+                    insertMention(mentionItems[mentionIndex]);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setMentionQuery(null);
+                    return;
+                  }
+                }
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   submit(event);
@@ -267,7 +385,13 @@ export function ChatView({
   );
 }
 
-function Bubble({ message }: { message: ChatMessage }) {
+function Bubble({
+  message,
+  onSearchPrices,
+}: {
+  message: ChatMessage;
+  onSearchPrices: (query: string) => void;
+}) {
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -291,7 +415,7 @@ function Bubble({ message }: { message: ChatMessage }) {
       <div className={clsx("text-[14.5px] leading-relaxed", message.error && "text-red-500")}>
         {message.content ? (
           <Markdown text={message.content} />
-        ) : (
+        ) : message.toolCall ? null : (
           <span className="inline-flex gap-1">
             {[0, 1, 2].map((index) => (
               <span
@@ -306,6 +430,8 @@ function Bubble({ message }: { message: ChatMessage }) {
           <span className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[3px] animate-pulse-soft bg-accent-500" />
         )}
       </div>
+
+      {message.toolCall && <PriceToolCard state={message.toolCall} onOpenFull={onSearchPrices} />}
 
       {!message.streaming && message.content && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">

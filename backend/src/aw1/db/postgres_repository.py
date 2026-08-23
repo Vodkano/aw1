@@ -209,6 +209,28 @@ class PostgresRepository:
             for row in rows
         ]
 
+    async def search_items(self, keywords: list[str], limit: int = 5) -> list[dict[str, Any]]:
+        """Ver Repository.search_items (db/repository.py): misma logica, LIKE
+        con LOWER() forzado de los dos lados para que se comporte igual que en
+        SQLite (Postgres no es case-insensitive por defecto)."""
+        if not keywords:
+            return []
+        clauses = " OR ".join(f"LOWER(text) LIKE ${index + 1}" for index in range(len(keywords)))
+        params = [f"%{keyword}%" for keyword in keywords]
+        rows = await self._conn.fetch(
+            f"SELECT id, text, source, kind, meta, created_at FROM saved_items "  # noqa: S608
+            f"WHERE {clauses} ORDER BY id DESC LIMIT ${len(keywords) + 1}",
+            *params, limit,
+        )
+        return [
+            {
+                "id": row["id"], "text": row["text"], "source": row["source"],
+                "kind": row["kind"], "meta": json.loads(row["meta"]),
+                "created_at": _parse(row["created_at"]),
+            }
+            for row in rows
+        ]
+
     async def count_items(self) -> int:
         return int(await self._conn.fetchval("SELECT COUNT(*) FROM saved_items") or 0)
 

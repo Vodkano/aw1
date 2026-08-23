@@ -117,3 +117,4 @@ class StatusResponse(BaseModel):
     database: str
     auth_enabled: bool
     browser: dict[str, Any]
+    mentions: list[dict[str, str]] = []

@@ -227,6 +227,33 @@ class Repository:
             for row in rows
         ]
 
+    async def search_items(self, keywords: list[str], limit: int = 5) -> list[dict[str, Any]]:
+        """Coincidencia simple por palabras clave, sin busqueda semantica -de
+        sobra para el volumen esperado (max_saved_items, 500 por defecto).
+        Los keywords deben venir ya en minuscula: LIKE es case-insensitive
+        para ASCII en SQLite pero NO en Postgres, asi que se fuerza LOWER()
+        de los dos lados en ambos repositorios para que se comporten igual.
+        """
+        if not keywords:
+            return []
+        clauses = " OR ".join(["LOWER(text) LIKE ?"] * len(keywords))
+        params = [f"%{keyword}%" for keyword in keywords]
+        cursor = await self._conn.execute(
+            f"SELECT id, text, source, kind, meta, created_at FROM saved_items "  # noqa: S608
+            f"WHERE {clauses} ORDER BY id DESC LIMIT ?",
+            (*params, limit),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [
+            {
+                "id": row["id"], "text": row["text"], "source": row["source"],
+                "kind": row["kind"], "meta": json.loads(row["meta"]),
+                "created_at": _parse(row["created_at"]),
+            }
+            for row in rows
+        ]
+
     async def count_items(self) -> int:
         cursor = await self._conn.execute("SELECT COUNT(*) AS total FROM saved_items")
         row = await cursor.fetchone()

@@ -2,17 +2,21 @@
 
 Recorrido de un mensaje:
 
-    1. Se limpia la entrada (las faltas de ortografia no rompen nada).
+    1. Se limpia la entrada y se le quita una mencion "@algo" si trae una
+       (fuerza esa ruta puntual: una herramienta, o el proveedor gpt/ollama).
     2. El modelo decide la ruta; si no responde, manda la heuristica local.
     3. El razonamiento se guarda en la base de datos y **nunca** se envia al
        navegador.
-    4. Codigo, analisis largo o actualidad ("heavy" / needs_fresh_data) ->
+    4. Si el intent (o la mencion) coincide con una herramienta registrada
+       (ver chat/tools/), se ejecuta directo -sin redirigir de pestana.
+    5. Codigo, analisis largo o actualidad ("heavy" / needs_fresh_data) ->
        GPT automaticamente si esta configurado, sin pedir permiso -la
        interfaz avisa despues, mostrando de que modelo vino la respuesta.
        Sin clave configurada, cae al modelo local y se explica por que.
-    5. Biografia -> Wikipedia, y el modelo local redacta a partir de ese
-       extracto citando la fuente.
-    6. Precio -> se ofrece lanzar el comparador, que es quien sabe hacerlo.
+       Una mencion "@gpt"/"@ollama" fuerza esta decision para ese mensaje.
+    6. Biografia -> Wikipedia. Charla/codigo -> se suma contexto de la
+       memoria guardada a mano (solo lectura, ver chat/memory.py) si algo
+       calza. El modelo local (o GPT, si aplica) redacta con ese contexto.
 
 Todo sale como eventos para que la interfaz escriba token a token.
 """
@@ -20,9 +24,9 @@ Todo sale como eventos para que la interfaz escriba token a token.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -37,7 +41,9 @@ from ..llm.groq_client import GroqClient
 from ..llm.judges import Judges
 from ..llm.prompts import CHAT_SYSTEM
 from ..settings import Settings
-from . import heuristics
+from . import heuristics, memory
+from .events import ChatEvent
+from .tools.base import ChatTool, ToolRegistry
 from .wikipedia import Wikipedia
 
 logger = logging.getLogger(__name__)
@@ -49,11 +55,20 @@ CLARIFY = (
     "completo de la persona, el lenguaje de programacion, o el producto exacto."
 )
 
+# Coincide con "@algo" en cualquier parte del mensaje (no solo al inicio):
+# "hola @precios notebook barato" debe reconocer la mencion igual.
+_MENTION = re.compile(r"@(\w+)\b")
 
-@dataclass(slots=True)
-class ChatEvent:
-    type: str
-    data: dict[str, Any]
+MENTION_PROVIDERS = (
+    {
+        "id": "gpt", "label": "gpt",
+        "description": "Fuerza GPT para este mensaje.", "kind": "provider",
+    },
+    {
+        "id": "ollama", "label": "ollama",
+        "description": "Fuerza el modelo local para este mensaje.", "kind": "provider",
+    },
+)
 
 
 class ChatService:
@@ -66,6 +81,7 @@ class ChatService:
         judges: Judges,
         wikipedia: Wikipedia,
         secrets: SecretsStore,
+        tools: ToolRegistry,
     ) -> None:
         self._settings = settings
         self._repo = repository
@@ -73,6 +89,7 @@ class ChatService:
         self._judges = judges
         self._wiki = wikipedia
         self._secrets = secrets
+        self._tools = tools
 
     def set_client(self, client: OllamaClient | GroqClient) -> None:
         """Cambia el cliente LLM en caliente (panel admin), sin reiniciar el proceso."""
@@ -104,6 +121,11 @@ class ChatService:
         if len(clean) > MAX_MESSAGE:
             raise ValidationError(f"El mensaje supera los {MAX_MESSAGE} caracteres.")
 
+        known_mentions = {"gpt", "ollama", *self._tools.ids()}
+        clean, mention = self._extract_mention(clean, known_mentions)
+        if not clean:
+            raise ValidationError("Escribe un mensaje.")
+
         conversation = conversation_id or uuid.uuid4().hex
         yield ChatEvent("start", {"conversation_id": conversation})
 
@@ -114,21 +136,17 @@ class ChatService:
         yield ChatEvent("route", {"intent": route.intent})
 
         # -- rutas que no llegan al modelo -------------------------------
-        if route.intent == "confuso":
+        if route.intent == "confuso" and mention is None:
             async for event in self._say(conversation, clean, CLARIFY, "system"):
                 yield event
             return
 
-        if route.intent == "precio":
-            product = route.search_terms or clean
-            text = (
-                f"Eso lo resuelve el comparador: abre la pestana Precios y busca "
-                f"«{product}». Recorro varias tiendas con un navegador real y te "
-                "traigo el precio y el enlace directo de cada una."
-            )
-            async for event in self._say(conversation, clean, text, "system"):
+        # -- herramientas: por intent detectado, o por mencion explicita -
+        tool_id = mention if (mention and self._tools.get(mention)) else route.intent
+        tool = self._tools.get(tool_id)
+        if tool is not None:
+            async for event in self._run_tool(tool, route, clean, conversation):
                 yield event
-            yield ChatEvent("action", {"kind": "search_prices", "query": product})
             return
 
         # -- tareas que se benefician de un modelo mas fuerte -------------
@@ -138,24 +156,16 @@ class ChatService:
         # pregunta como biografia Y heavy/needs_fresh_data a la vez (ej.
         # "quien es el actual presidente de Francia"), y en ese caso gana
         # Wikipedia -es la garantia de cita de fuente, no queremos que GPT la
-        # salte silenciosamente.
+        # salte silenciosamente. "@gpt"/"@ollama" fuerzan la decision.
         wants_gpt = (route.heavy or route.needs_fresh_data) and route.intent != "biografia"
-        if wants_gpt:
-            if self.gpt_configured():
-                async for event in self._answer_with_gpt(conversation, clean, history):
-                    yield event
-                return
-            yield ChatEvent(
-                "notice",
-                {
-                    "text": (
-                        "Esto se beneficiaria de GPT, pero no esta configurado; "
-                        "respondo con el modelo local."
-                    ),
-                },
-            )
+        if mention == "gpt":
+            wants_gpt = True
+        elif mention == "ollama":
+            wants_gpt = False
 
-        # -- Wikipedia para biografias -----------------------------------
+        # -- contexto: Wikipedia para biografias, memoria guardada para el
+        # resto -se calcula antes de decidir GPT/local porque ambos caminos
+        # lo necesitan.
         context_block = ""
         sources: list[str] = []
         if route.intent == "biografia":
@@ -170,6 +180,25 @@ class ChatService:
                     f"<<<DATOS>>>\n{extract}\n{url}\n<<<FIN>>>"
                 )
                 yield ChatEvent("source", {"url": url, "kind": "wikipedia"})
+        elif route.intent in {"charla", "codigo"}:
+            context_block = await memory.recall(self._repo, route, clean)
+
+        if wants_gpt:
+            if self.gpt_configured():
+                async for event in self._answer_with_gpt(
+                    conversation, clean, history, context_block
+                ):
+                    yield event
+                return
+            yield ChatEvent(
+                "notice",
+                {
+                    "text": (
+                        "Esto se beneficiaria de GPT, pero no esta configurado; "
+                        "respondo con el modelo local."
+                    ),
+                },
+            )
 
         async for event in self._answer_with_ollama(
             conversation, clean, history, context_block, sources
@@ -177,6 +206,45 @@ class ChatService:
             yield event
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_mention(message: str, known: set[str]) -> tuple[str, str | None]:
+        """Saca un "@algo" del mensaje si coincide con una herramienta o
+        proveedor conocido, en cualquier parte del texto. Devuelve el mensaje
+        sin la mencion (y sin dobles espacios) y el id encontrado, o None."""
+        match = _MENTION.search(message)
+        if match and match.group(1).lower() in known:
+            cleaned = message[: match.start()] + message[match.end() :]
+            return " ".join(cleaned.split()), match.group(1).lower()
+        return message, None
+
+    async def _run_tool(
+        self, tool: ChatTool, route: Any, message: str, conversation: str
+    ) -> AsyncIterator[ChatEvent]:
+        try:
+            async for event in tool.run(route, message, conversation):
+                if event.type == "tool_result":
+                    answer = event.data["answer"]
+                    source = event.data.get("source", "system")
+                    sources = event.data.get("sources", [])
+                    yield ChatEvent("token", {"text": answer})
+                    await self._persist(conversation, message, answer, source)
+                    yield ChatEvent(
+                        "done",
+                        {
+                            "answer": answer, "source": source, "sources": sources,
+                            "conversation_id": conversation,
+                        },
+                    )
+                    return
+                yield event
+        except Exception:  # noqa: BLE001 - una herramienta no debe tumbar el chat
+            logger.exception("La herramienta '%s' fallo.", tool.intent)
+            async for event in self._say(
+                conversation, message,
+                "Hubo un problema ejecutando esa accion. Intenta de nuevo.", "system",
+            ):
+                yield event
+
     async def _safe_route(self, message: str) -> Any:
         try:
             return await self._judges.route_chat(message)
@@ -239,8 +307,13 @@ class ChatService:
         )
 
     async def _answer_with_gpt(
-        self, conversation: str, message: str, history: list[dict[str, str]]
+        self,
+        conversation: str,
+        message: str,
+        history: list[dict[str, str]],
+        context_block: str = "",
     ) -> AsyncIterator[ChatEvent]:
+        user_content = f"{context_block}\n\n{message}" if context_block else message
         payload = {
             "model": self._settings.openai_model,
             "messages": [
@@ -253,7 +326,7 @@ class ChatService:
                     ),
                 },
                 *history,
-                {"role": "user", "content": message},
+                {"role": "user", "content": user_content},
             ],
             "temperature": 0.4,
             "max_tokens": 900,
@@ -350,4 +423,5 @@ class ChatService:
             "database": "online" if await self._repo.healthy() else "offline",
             "env": self._settings.env,
             "auth_enabled": self._settings.auth_enabled,
+            "mentions": [*MENTION_PROVIDERS, *self._tools.mentionable()],
         }

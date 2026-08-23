@@ -1,6 +1,13 @@
 /** Contratos compartidos con el backend. */
 
-export type Source = "local" | "wikipedia" | "gpt" | "system";
+export type Source = "local" | "wikipedia" | "gpt" | "system" | "prices";
+
+export interface Mention {
+  id: string;
+  label: string;
+  description: string;
+  kind: "tool" | "provider";
+}
 
 export interface Status {
   version: string;
@@ -12,7 +19,19 @@ export interface Status {
   gpt_configured: boolean;
   database: string;
   auth_enabled: boolean;
-  browser: { ready: boolean; headless: boolean; contexts: number; error: string };
+  browser: { ready: boolean; headless: boolean; contexts: number; error: string; proxy: boolean };
+  mentions: Mention[];
+}
+
+/** Estado de una herramienta de precios corriendo dentro del chat (evento "tool_event"). */
+export interface PriceToolState {
+  phase: "start" | "plan" | "store_start" | "store_cards" | "store_picked" | "offer" | "store_done" | "verdict_pending" | "done" | "error";
+  query: string;
+  plan: SearchPlan | null;
+  stores: StoreOutcome[];
+  offers: Offer[];
+  comparison: Comparison | null;
+  error: string;
 }
 
 export interface ChatMessage {
@@ -23,6 +42,7 @@ export interface ChatMessage {
   sources?: string[];
   streaming?: boolean;
   error?: boolean;
+  toolCall?: PriceToolState;
 }
 
 export interface Offer {
