@@ -6,6 +6,7 @@ import {
   Bookmark,
   SlidersHorizontal,
   Bot,
+  Settings2,
   Moon,
   Sun,
   Circle,
@@ -13,16 +14,18 @@ import {
 import type { Status } from "../types";
 import { useTheme } from "../lib/useTheme";
 
-export type ViewKey = "chat" | "prices" | "memory" | "settings" | "admin";
+export type ViewKey = "chat" | "prices" | "memory" | "settings" | "admin" | "agents";
 
+// "admin" y "agents" siguen exigiendo su propia password (X-Admin-Password)
+// aparte del token general -el boton solo ahorra tener que escribir la URL
+// (#admin / #agents) a mano, no baja la seguridad.
 const NAV: { key: ViewKey; label: string; icon: typeof MessageSquare }[] = [
   { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "prices", label: "Precios", icon: Tags },
   { key: "memory", label: "Guardado", icon: Bookmark },
   { key: "settings", label: "Ajustes", icon: SlidersHorizontal },
-  // Sigue exigiendo su propia password (X-Admin-Password) aparte del token
-  // general -el boton solo ahorra tener que escribir #admin a mano.
-  { key: "admin", label: "Admin", icon: Bot },
+  { key: "agents", label: "Agentes", icon: Bot },
+  { key: "admin", label: "Admin", icon: Settings2 },
 ];
 
 function StatusDot({ status }: { status: Status | null }) {

@@ -6,11 +6,11 @@ import { PricesView } from "./views/PricesView";
 import { MemoryView } from "./views/MemoryView";
 import { SettingsView } from "./views/SettingsView";
 import { AdminView } from "./views/AdminView";
+import { AgentsView } from "./views/AgentsView";
 import { api, ApiError, getToken, setToken } from "./lib/api";
 import type { Status } from "./types";
 
-// "admin" no esta en NAV (Shell.tsx): solo se llega escribiendo #admin.
-const VALID: ViewKey[] = ["chat", "prices", "memory", "settings", "admin"];
+const VALID: ViewKey[] = ["chat", "prices", "memory", "settings", "admin", "agents"];
 
 function fromHash(): ViewKey {
   const value = window.location.hash.replace("#", "") as ViewKey;
@@ -136,9 +136,11 @@ export default function App() {
     [go],
   );
 
-  // /#admin tiene su propia password, separada de este token -no la bloquea.
-  const needsAuth = view !== "admin" && tokenValid === false;
-  const checking = view !== "admin" && tokenValid === null;
+  // /#admin y /#agents tienen su propia password, separada de este token -no
+  // las bloquea el token general.
+  const isPrivateView = view === "admin" || view === "agents";
+  const needsAuth = !isPrivateView && tokenValid === false;
+  const checking = !isPrivateView && tokenValid === null;
 
   return (
     <Shell view={view} onView={go} status={status}>
@@ -151,6 +153,7 @@ export default function App() {
           {view === "memory" && <MemoryView />}
           {view === "settings" && <SettingsView status={status} onRefresh={refresh} />}
           {view === "admin" && <AdminView />}
+          {view === "agents" && <AgentsView />}
         </>
       )}
     </Shell>
