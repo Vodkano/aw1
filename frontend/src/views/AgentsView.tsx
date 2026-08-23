@@ -241,6 +241,10 @@ function TelegramProfilesCard() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState("");
   const [newToken, setNewToken] = useState("");
+  const [newPrompt, setNewPrompt] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [generateBusy, setGenerateBusy] = useState(false);
+  const [generateError, setGenerateError] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
 
@@ -249,16 +253,33 @@ function TelegramProfilesCard() {
     load();
   }, []);
 
+  const generateNewPrompt = async () => {
+    const value = newDescription.trim();
+    if (!value) return;
+    setGenerateBusy(true);
+    setGenerateError("");
+    try {
+      const result = await admin.generatePrompt(value);
+      setNewPrompt(result.system_prompt);
+    } catch (err) {
+      setGenerateError(err instanceof ApiError ? err.message : "No se pudo generar el prompt.");
+    } finally {
+      setGenerateBusy(false);
+    }
+  };
+
   const create = async () => {
     if (!newLabel.trim() || !newToken.trim()) return;
     setCreateBusy(true);
     setCreateError("");
     try {
       const row = await admin.createTelegramProfile({
-        label: newLabel.trim(), bot_token: newToken.trim(), system_prompt: "",
+        label: newLabel.trim(), bot_token: newToken.trim(), system_prompt: newPrompt.trim(),
       });
       setNewLabel("");
       setNewToken("");
+      setNewPrompt("");
+      setNewDescription("");
       setExpandedId(row.id);
       load();
     } catch (err) {
@@ -291,15 +312,44 @@ function TelegramProfilesCard() {
           placeholder="Token de @BotFather"
           className="input"
         />
-        <button
-          type="button"
-          disabled={createBusy || !newLabel.trim() || !newToken.trim()}
-          onClick={create}
-          className="btn btn-primary shrink-0 px-4 py-1.5 text-[13px]"
-        >
-          {createBusy ? "Creando..." : "Crear"}
-        </button>
       </div>
+
+      <div className="mt-2">
+        <textarea
+          value={newPrompt}
+          onChange={(event) => setNewPrompt(event.target.value)}
+          rows={4}
+          placeholder="Personalidad del bot (system prompt). Puedes dejarlo vacio y usar el estilo normal del chat."
+          className="input w-full resize-y"
+        />
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <input
+            value={newDescription}
+            onChange={(event) => setNewDescription(event.target.value)}
+            placeholder="Describe el bot en una frase..."
+            className="input max-w-xs"
+          />
+          <button
+            type="button"
+            disabled={generateBusy || !newDescription.trim()}
+            onClick={generateNewPrompt}
+            className="chip hover:text-[var(--text)]"
+          >
+            <Sparkles className="size-3" />
+            {generateBusy ? "Generando..." : "Generar con IA"}
+          </button>
+        </div>
+        {generateError && <p className="mt-1.5 text-[12px] text-red-500">{generateError}</p>}
+      </div>
+
+      <button
+        type="button"
+        disabled={createBusy || !newLabel.trim() || !newToken.trim()}
+        onClick={create}
+        className="btn btn-primary mt-3 px-4 py-1.5 text-[13px]"
+      >
+        {createBusy ? "Creando..." : "Crear agente"}
+      </button>
       {createError && <p className="mt-2 text-[12.5px] text-red-500">{createError}</p>}
 
       <div className="mt-4">
