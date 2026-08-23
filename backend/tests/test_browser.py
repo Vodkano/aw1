@@ -8,7 +8,27 @@ Paris y Lider.
 
 import pytest
 
+from aw1.browser.pool import _parse_proxy
 from tests.fixtures.store import FakeStore
+
+
+def test_parse_proxy_splits_credentials_from_the_server():
+    proxy = _parse_proxy("http://user:secret@proxy.example.com:8080")
+    assert proxy == {
+        "server": "http://proxy.example.com:8080",
+        "username": "user",
+        "password": "secret",
+    }
+
+
+def test_parse_proxy_without_credentials():
+    assert _parse_proxy("http://proxy.example.com:8080") == {
+        "server": "http://proxy.example.com:8080"
+    }
+
+
+def test_parse_proxy_rejects_an_unparsable_value():
+    assert _parse_proxy("no es una url") is None
 
 
 def test_the_search_page_has_no_products_in_the_raw_html(store: FakeStore):

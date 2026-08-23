@@ -199,17 +199,24 @@ cambia el comportamiento:
 | `AW1_BROWSER_HEADLESS` | `true` | Ponlo en `false` para ver a Chromium trabajar |
 | `AW1_SEARCH_BUDGET_SECONDS` | `90` | Tope duro de una búsqueda completa |
 | `AW1_STORES_PER_SEARCH` | `5` | Menos tiendas, resultado más rápido |
+| `AW1_BROWSER_PROXY_URL` | vacío | Proxy residencial rotativo (`http://usuario:clave@host:puerto`) para cuando el navegador corre en un datacenter y una tienda bloquea esa IP directo |
 | `AW1_FX_RATES_TO_CLP` | tabla | Conversión para comparar monedas distintas |
 | `AW1_API_TOKEN` | vacío | Activa autenticación. Opcional incluso en producción: el chat y el comparador de precios son de uso libre por diseño; si se define, protege el resto de la API |
 
 ### Rendimiento en un MacBook Air
 
-Una búsqueda en 5 tiendas con `mistral` tarda entre 30 y 60 segundos, y el
-grueso es el modelo, no el navegador. Dos ajustes que ayudan mucho:
+El comparador hace varias llamadas al modelo por búsqueda (plan, elegir
+candidatos, leer cada ficha, veredicto final): con `mistral` de juez cada una
+tarda 40-45s y una búsqueda completa termina agotando el tiempo antes de
+encontrar nada. Hace falta un modelo más chico para esas decisiones -pero
+probado en la práctica: `qwen2.5:1.5b` es tan chico que a veces dice "no hay
+precio" con la información justo delante. `llama3.2:3b` (2 GB) resultó mejor
+en los dos sentidos: ~15s por decisión y veredictos correctos.
 
 ```bash
-ollama pull qwen2.5:1.5b
-AW1_OLLAMA_FAST_MODEL=qwen2.5:1.5b   # jueces rápidos, chat con mistral
+ollama pull llama3.2:3b              # si no la tienes ya
+AW1_OLLAMA_FAST_MODEL=llama3.2:3b    # jueces rapidos y confiables, chat con mistral
+AW1_SEARCH_BUDGET_SECONDS=150        # el default (90) queda justo con Ollama local
 AW1_STORES_PER_SEARCH=3
 ```
 

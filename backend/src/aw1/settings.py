@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     browser_timezone: str = "America/Santiago"
     browser_block_media: bool = True
     browser_executable_path: str = ""
+    # URL de un proxy rotativo (ej. http://usuario:clave@host:puerto), para
+    # cuando el navegador corre desde una IP de datacenter (AWS, etc.) y una
+    # tienda la bloquea directo -pasa igual con cualquier proveedor que
+    # entregue una URL de proxy estandar, no hay codigo especifico de nadie.
+    # Debe ser residencial/ISP: un proxy de datacenter no resuelve el bloqueo,
+    # sigue viendose como datacenter. Vacio: sin proxy (uso local normal).
+    browser_proxy_url: SecretStr | None = None
 
     # -- comparador ---------------------------------------------------------
     search_budget_seconds: float = Field(default=90.0, gt=5, le=600)

@@ -22,6 +22,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
@@ -72,6 +73,11 @@ class BrowserPool:
                 }
                 if self._settings.browser_executable_path:
                     launch_args["executable_path"] = self._settings.browser_executable_path
+                proxy_url = self._settings.browser_proxy_url
+                if proxy_url:
+                    proxy = _parse_proxy(proxy_url.get_secret_value())
+                    if proxy:
+                        launch_args["proxy"] = proxy
                 self._browser = await self._playwright.chromium.launch(**launch_args)
                 self._launch_error = ""
                 logger.info("Chromium listo (%d contextos)", self._settings.browser_max_contexts)
@@ -102,6 +108,7 @@ class BrowserPool:
             "headless": self._settings.browser_headless,
             "contexts": self._settings.browser_max_contexts,
             "error": self._launch_error,
+            "proxy": bool(self._settings.browser_proxy_url),
         }
 
     # -- contextos ----------------------------------------------------------
@@ -192,6 +199,22 @@ class BrowserPool:
             raise BrowserError("La pagina no devolvio contenido analizable.")
         payload.setdefault("url", final_url)
         return payload
+
+
+def _parse_proxy(url: str) -> dict[str, str] | None:
+    """Convierte una URL de proxy estandar (http://usuario:clave@host:puerto)
+    en el formato que espera Playwright. Usuario/clave van separados del
+    server: algunos proveedores no los aceptan bien embebidos en la URL."""
+    parsed = urlsplit(url)
+    if not parsed.hostname:
+        return None
+    port = f":{parsed.port}" if parsed.port else ""
+    proxy: dict[str, str] = {"server": f"{parsed.scheme}://{parsed.hostname}{port}"}
+    if parsed.username:
+        proxy["username"] = parsed.username
+    if parsed.password:
+        proxy["password"] = parsed.password
+    return proxy
 
 
 async def _block_heavy_resources(route: Any, request: Any) -> None:
