@@ -31,6 +31,10 @@ services:
       AW1_ALLOWED_ORIGINS: ${AW1_ALLOWED_ORIGINS:-http://127.0.0.1:8000,http://localhost:8000}
       AW1_BROWSER_MAX_CONTEXTS: ${AW1_BROWSER_MAX_CONTEXTS:-3}
       AW1_BROWSER_PROXY_URL: ${AW1_BROWSER_PROXY_URL:-}
+      # URL publica de esta instancia, para registrar el webhook de cada bot
+      # de Telegram (panel admin -> Bots de Telegram). Sin esto, crear un
+      # perfil falla explicito.
+      AW1_PUBLIC_BASE_URL: ${AW1_PUBLIC_BASE_URL:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://aw1:aw1@postgres:5432/aw1}
     volumes:
       - aw1-data:/data
