@@ -6,9 +6,9 @@ import { PasswordGate } from "../components/PasswordGate";
 import type { TelegramAgentSummary, TelegramTokenSummary } from "../types";
 
 const PERSONALITY_LABELS: Record<string, string> = {
-  calida: "Cercana y calida",
-  directa: "Directa y eficiente",
-  entusiasta: "Entusiasta y positiva",
+  calida: "Camila · cercana y calida",
+  directa: "Javiera · directa y eficiente",
+  entusiasta: "Antonia · entusiasta y positiva",
 };
 
 function TokenRow({
