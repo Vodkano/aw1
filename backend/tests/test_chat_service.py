@@ -297,6 +297,47 @@ async def test_gpt_mention_on_a_biography_keeps_the_wikipedia_citation(repo, tmp
     assert done.data["sources"] == ["https://es.wikipedia.org/wiki/Prueba"]
 
 
+async def test_an_invalid_gpt_key_falls_back_to_ollama_instead_of_dead_ending(repo, tmp_path):
+    """Bug real en produccion: una clave de OpenAI configurada pero invalida
+    (rechazada con 401 por la API) terminaba la conversacion con el texto
+    del error como si fuera la respuesta -para los agentes de Telegram
+    (force_gpt=True, sin red de seguridad de "no configurado") eso
+    significaba contestarle a la persona "la clave no es valida" en vez de
+    responder de verdad. Ahora cae al modelo local, igual que cuando GPT
+    directamente no esta configurado."""
+    fake = FakeOllama(online=True)
+    judges = Judges(fake, model="mistral", timeout=5)
+    settings = Settings(_env_file=None, env="test", data_dir=tmp_path, openai_api_key="sk-invalida")
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    service = ChatService(
+        settings=settings, repository=repo, llm=fake, judges=judges,
+        wikipedia=Wikipedia(), secrets=secrets, tools=ToolRegistry([]),
+    )
+
+    class FakeResponse:
+        status_code = 401
+
+        async def aread(self) -> bytes:
+            return b""
+
+    class FakeStreamCtx:
+        async def __aenter__(self) -> FakeResponse:
+            return FakeResponse()
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+    with patch("httpx.AsyncClient.stream", return_value=FakeStreamCtx()):
+        events = await _collect(service.stream("hola", force_gpt=True))
+
+    assert any(
+        event.type == "notice" and "no es valida" in event.data["text"] for event in events
+    )
+    done = next(event for event in events if event.type == "done")
+    assert done.data["source"] == "local"
+
+
 # --- memoria de largo plazo, solo lectura --------------------------------------
 async def test_memory_recall_is_included_for_charla(repo, test_settings):
     await repo.save_item("El auto de Pedro es un Toyota Corolla 2020, patente ABCD12.")

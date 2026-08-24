@@ -224,21 +224,32 @@ class ChatService:
 
         if wants_gpt:
             if self.gpt_configured():
-                async for event in self._answer_with_gpt(
-                    conversation, clean, history, context_block, sources,
-                    system_prompt=system_prompt,
-                ):
-                    yield event
-                return
-            yield ChatEvent(
-                "notice",
-                {
-                    "text": (
-                        "Esto se beneficiaria de GPT, pero no esta configurado; "
-                        "respondo con el modelo local."
-                    ),
-                },
-            )
+                try:
+                    async for event in self._answer_with_gpt(
+                        conversation, clean, history, context_block, sources,
+                        system_prompt=system_prompt,
+                    ):
+                        yield event
+                    return
+                except ProviderError as error:
+                    # Clave configurada pero invalida, GPT caido, etc.: se
+                    # avisa y se sigue en local -mismo trato que "GPT no
+                    # configurado". El error nunca llego a emitir un token
+                    # (se detecta antes de empezar a leer el stream de
+                    # OpenAI), asi que no hay nada a medias que limpiar.
+                    yield ChatEvent(
+                        "notice", {"text": f"{error.message} Respondo con el modelo local."}
+                    )
+            else:
+                yield ChatEvent(
+                    "notice",
+                    {
+                        "text": (
+                            "Esto se beneficiaria de GPT, pero no esta configurado; "
+                            "respondo con el modelo local."
+                        ),
+                    },
+                )
 
         async for event in self._answer_with_ollama(
             conversation, clean, history, context_block, sources,
@@ -380,10 +391,12 @@ class ChatService:
             ) as response:
                 if response.status_code >= 400:
                     await response.aread()
-                    text = self._explain_gpt(response.status_code)
-                    async for event in self._say(conversation, message, text, "system"):
-                        yield event
-                    return
+                    # Nada se yieldeo todavia (el streaming de tokens
+                    # empieza recien abajo): es seguro que el llamador
+                    # capture esto y siga en el modelo local, en vez de
+                    # cortar la conversacion con un mensaje de error -mismo
+                    # trato que "GPT no configurado".
+                    raise ProviderError(self._explain_gpt(response.status_code))
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -400,12 +413,8 @@ class ChatService:
                     if piece:
                         collected.append(piece)
                         yield ChatEvent("token", {"text": piece})
-        except httpx.HTTPError:
-            async for event in self._say(
-                conversation, message, "No se pudo contactar con GPT.", "system"
-            ):
-                yield event
-            return
+        except httpx.HTTPError as error:
+            raise ProviderError("No se pudo contactar con GPT.") from error
 
         answer = "".join(collected).strip()
         if not answer:

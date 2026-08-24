@@ -295,7 +295,18 @@ async def _draft_system_prompt(description: str, box: Container) -> str:
         except httpx.HTTPError as error:
             raise ProviderError("No se pudo contactar a GPT.") from error
     if response.status_code != 200:
-        raise ProviderError("GPT no pudo generar el prompt.")
+        # El mensaje de OpenAI (ej. "Incorrect API key provided: ...") es lo
+        # que de verdad ayuda a diagnosticar esto -un "no se pudo" generico
+        # no le dice al admin si el problema es la clave, el modelo o el
+        # proveedor.
+        detail = ""
+        try:
+            detail = str(response.json().get("error", {}).get("message", ""))
+        except ValueError:
+            pass
+        if response.status_code in (401, 403):
+            raise ProviderError(f"La clave de GPT no es valida. {detail}".strip())
+        raise ProviderError(f"GPT no pudo generar el prompt ({response.status_code}). {detail}".strip())
     return str(response.json()["choices"][0]["message"]["content"]).strip()
 
 
