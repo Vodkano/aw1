@@ -27,6 +27,7 @@ from ..schemas import (
     CreateTelegramTokenRequest,
     GeneratedPromptResult,
     GeneratePromptRequest,
+    HumanizePromptRequest,
     SetSecretRequest,
     TelegramAgentApiSummary,
     TelegramAgentFileSummary,
@@ -328,45 +329,127 @@ _PROMPT_WRITER_SYSTEM = """\
 Escribes la parte PROPIA de un agente de Telegram, en espanol -no un prompt
 completo desde cero. Ya existe una base compartida que cubre tono humano,
 calidez, actitud pro-cliente y limites generales de conducta: no la
-repitas. Enfocate solo en lo especifico de este agente a partir de la
-descripcion que te den:
+repitas.
 
-- Para que sirve exactamente y que temas puede resolver.
-- Que informacion o pasos necesita pedirle a la persona para ayudar.
-- Donde termina su alcance (que deriva a un humano o simplemente no puede
-  hacer).
+Vas a recibir apenas UNA FRASE corta describiendo el negocio o el agente
+-es todo lo que hay, y es normal: tu trabajo es igual escribir un prompt
+especifico y completo a partir de eso, no una version generica. A partir de
+la frase, imagina en detalle un flujo de atencion realista para ese rubro
+puntual y escribi:
+
+- Para que sirve exactamente este agente y que temas puede resolver
+  -nombralos (los productos, tramites o problemas tipicos de ESE rubro),
+  nunca algo tan generico como "tus consultas".
+- Que pregunta primero para poder ayudar bien: el dato minimo que necesita
+  antes de responder (talla, direccion, modelo del producto, sintoma del
+  problema, lo que corresponda a ese rubro especifico).
+- Donde termina su alcance -a que deriva, a que humano o canal, o que
+  simplemente no puede hacer- siendo especifico a que tipo de caso, no una
+  regla generica de "si no puedo ayudar te derivo".
 
 Regla mas importante: NUNCA describas una accion que el agente en realidad
 no puede ejecutar -guardar algo en una base de datos, consultar un sistema
-externo, agendar, enviar un correo, cobrar un pago- salvo que la
-descripcion lo mencione explicitamente como algo real. Si el agente solo
-puede conversar y dar informacion, el prompt tiene que dejar eso claro,
-nunca simular una funcionalidad que no existe: eso termina con el agente
-prometiendo cosas que despues no puede cumplir.
+externo, agendar, enviar un correo, cobrar un pago, confirmar un despacho-
+salvo que la descripcion lo mencione explicitamente como algo real. Si el
+agente solo puede conversar y dar informacion, el prompt tiene que dejar
+eso claro y decir a donde derivar en cambio, nunca simular una
+funcionalidad que no existe: eso termina con el agente prometiendo cosas
+que despues no puede cumplir.
 
-Responde SOLO con el texto del prompt, sin explicaciones ni comillas.
+Los ejemplos que siguen son de otros rubros -no los copies, son solo
+referencia del nivel de especificidad y la extension esperada (3 parrafos
+cortos, sin titulos ni listas).
+
+Responde SOLO con el texto del prompt, sin explicaciones, comillas ni
+encabezados.
+"""
+
+_PROMPT_WRITER_EXAMPLES: list[tuple[str, str]] = [
+    (
+        "vendo zapatillas deportivas por catalogo",
+        "Atiendes la tienda de zapatillas deportivas por catalogo. Ayudas a "
+        "encontrar el modelo que la persona busca y resolver dudas de talla, "
+        "color y stock disponible.\n\n"
+        "Cuando alguien pregunte por un producto, pedile el uso que busca "
+        "(running, casual, basketball, etc.) y su talla para orientarla "
+        "mejor. Si hay un catalogo cargado como archivo, es tu fuente real "
+        "de lo que existe -si algo no esta ahi, decilo con claridad en vez "
+        "de inventar que si hay.\n\n"
+        "No podes procesar pagos ni confirmar despachos por este chat: si la "
+        "persona ya decidio comprar, indicale el paso que sigue para cerrar "
+        "el pedido en vez de simular que la compra ya quedo hecha.",
+    ),
+    (
+        "soporte tecnico de internet hogar, planes gigalan",
+        "Brindas soporte tecnico de primera linea para clientes de internet "
+        "hogar de Gigalan: sin conexion, wifi lento, router que no enciende, "
+        "contrasena de red olvidada.\n\n"
+        "Antes de dar pasos de solucion, pedile a la persona que cuente que "
+        "luces tiene el router y que probo hasta ahora, para no repetirle "
+        "pasos que ya hizo. Guiala de a un paso a la vez y confirma si "
+        "funciono antes de seguir con el proximo.\n\n"
+        "Si el problema no se resuelve con los pasos basicos -corte en la "
+        "zona, router danado, instalacion nueva- decile con claridad que "
+        "este caso necesita un tecnico humano. No prometas visitas, plazos "
+        "de reparacion ni compensaciones: no tenes esa informacion.",
+    ),
+    (
+        "restaurante de comida peruana, reservas por whatsapp",
+        "Atiendes las consultas del restaurante de comida peruana: "
+        "horarios, ubicacion, platos del menu y precios. Si el menu esta "
+        "cargado como archivo, es tu fuente real de platos y precios -nunca "
+        "inventes un plato que no este ahi.\n\n"
+        "Cuando alguien pregunte por una reserva, aclarale que las reservas "
+        "se hacen por WhatsApp -no las gestionas en este chat- y dale el "
+        "contacto si lo tenes disponible; si no lo tenes, decile que "
+        "consulte por ese medio sin inventar un numero.\n\n"
+        "Si preguntan por alergenos o ingredientes que no esten claros en "
+        "el menu, decilo con honestidad en vez de asumir: son datos que "
+        "pueden importarle a la salud de la persona.",
+    ),
+]
+
+_HUMANIZE_SYSTEM = """\
+Reescribes el prompt de sistema de un agente de Telegram para que suene
+mas natural y humano -es una pasada de estilo, no de contenido. Tenes que
+conservar TODAS las instrucciones, limites, alcance e informacion que ya
+estaban; no agregues capacidades nuevas ni le saques limites que ya tenia,
+y no inventes datos (nombres de productos, precios, plazos) que no estaban
+en el original.
+
+Lo que si podes cambiar:
+- Frases rigidas o de manual ("estimado usuario", "proceda a", "su
+  consulta sera atendida a la brevedad") por como las diria una persona
+  real charlando.
+- Redundancia y relleno -si algo esta dicho dos veces con distintas
+  palabras, dejalo dicho una sola vez, mejor.
+- Estructura de lista/vinetas forzada, si el contenido fluye mejor como
+  parrafos cortos.
+
+Mismo idioma (espanol). Responde SOLO con el texto reescrito, sin
+explicaciones, comillas ni encabezados.
 """
 
 
-async def _draft_system_prompt(description: str, box: Container) -> str:
-    """Un prompt de sistema listo para un bot de Telegram, a partir de una
-    descripcion corta. No es un turno de ChatService.stream() -eso traeria
-    ruteo/memoria/menciones, de mas para esto- sino una llamada directa y
-    simple a OpenAI, mismo patron crudo que _test_provider_key."""
+async def _complete_chat(
+    messages: list[dict[str, str]], *, box: Container, max_tokens: int, temperature: float,
+) -> str:
+    """Llamada directa y simple a OpenAI chat/completions, sin pasar por
+    ChatService.stream() -eso traeria ruteo/memoria/menciones, de mas para
+    una tarea puntual de escritura como esta. Mismo patron crudo que
+    _test_provider_key, compartido por el generador y el humanizador de
+    prompts."""
     key = llm_provider.openai_key(box.settings, box.secrets)
     if not key.strip():
         raise ValidationError("GPT no esta configurado; agrega una clave de OpenAI primero.")
     payload = {
         "model": box.settings.openai_model,
-        "messages": [
-            {"role": "system", "content": _PROMPT_WRITER_SYSTEM},
-            {"role": "user", "content": description[:500]},
-        ],
-        "temperature": 0.6,
-        "max_tokens": 400,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
         "stream": False,
     }
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=25.0) as client:
         try:
             response = await client.post(
                 f"{box.settings.openai_base_url.rstrip('/')}/chat/completions",
@@ -390,9 +473,39 @@ async def _draft_system_prompt(description: str, box: Container) -> str:
     return str(response.json()["choices"][0]["message"]["content"]).strip()
 
 
+async def _draft_system_prompt(description: str, box: Container) -> str:
+    """Un prompt de sistema listo para un bot de Telegram, a partir de una
+    descripcion de una sola frase. Los ejemplos previos al pedido real son
+    few-shot -le muestran al modelo el nivel de especificidad esperado en
+    vez de solo describirlo en reglas, que es lo que de verdad evita que
+    una frase minima ("vendo zapatillas") termine en un prompt generico."""
+    messages: list[dict[str, str]] = [{"role": "system", "content": _PROMPT_WRITER_SYSTEM}]
+    for example_input, example_output in _PROMPT_WRITER_EXAMPLES:
+        messages.append({"role": "user", "content": example_input})
+        messages.append({"role": "assistant", "content": example_output})
+    messages.append({"role": "user", "content": description[:500]})
+    return await _complete_chat(messages, box=box, max_tokens=550, temperature=0.5)
+
+
+async def _humanize_prompt(system_prompt: str, box: Container) -> str:
+    messages = [
+        {"role": "system", "content": _HUMANIZE_SYSTEM},
+        {"role": "user", "content": system_prompt[:6000]},
+    ]
+    return await _complete_chat(messages, box=box, max_tokens=700, temperature=0.5)
+
+
 @router.post("/telegram-agents/generate-prompt", response_model=GeneratedPromptResult)
 async def generate_prompt(
     payload: GeneratePromptRequest, box: Container = Depends(container)
 ) -> GeneratedPromptResult:
     text = await _draft_system_prompt(payload.description, box)
+    return GeneratedPromptResult(system_prompt=text)
+
+
+@router.post("/telegram-agents/humanize-prompt", response_model=GeneratedPromptResult)
+async def humanize_prompt(
+    payload: HumanizePromptRequest, box: Container = Depends(container)
+) -> GeneratedPromptResult:
+    text = await _humanize_prompt(payload.system_prompt, box)
     return GeneratedPromptResult(system_prompt=text)

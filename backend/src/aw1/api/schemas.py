@@ -212,6 +212,12 @@ class GeneratePromptRequest(BaseModel):
     description: str = Field(min_length=1, max_length=500)
 
 
+class HumanizePromptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    system_prompt: str = Field(min_length=1, max_length=6000)
+
+
 class GeneratedPromptResult(BaseModel):
     system_prompt: str
 

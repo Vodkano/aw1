@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ChangeEvent } from "react";
 import clsx from "clsx";
-import { ChevronDown, Sparkles, Trash2, Plus, X, Upload, Globe } from "lucide-react";
+import { ChevronDown, Sparkles, Trash2, Plus, X, Upload, Globe, Wand2 } from "lucide-react";
 import { admin, ApiError, getAdminPassword, setAdminPassword } from "../lib/api";
 import { PasswordGate } from "../components/PasswordGate";
 import type {
@@ -442,6 +442,21 @@ function AgentRow({
     }
   };
 
+  const humanize = async () => {
+    const value = prompt.trim();
+    if (!value) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await admin.humanizePrompt(value);
+      setPrompt(result.system_prompt);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo humanizar el prompt.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async () => {
     if (!window.confirm(`Borrar el agente "${agent.label}" y todos sus bots? Tambien se quitan sus webhooks de Telegram.`)) return;
     await admin.deleteTelegramAgent(agent.id);
@@ -501,6 +516,16 @@ function AgentRow({
                 >
                   <Sparkles className="size-3" />
                   Generar con IA
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !prompt.trim()}
+                  onClick={humanize}
+                  className="chip hover:text-[var(--text)]"
+                  title="Reescribe el texto actual para que suene mas natural, sin cambiar lo que dice"
+                >
+                  <Wand2 className="size-3" />
+                  Humanizar
                 </button>
                 <button
                   type="button"
@@ -590,6 +615,21 @@ function NewAgentForm({ onCreated, onCancel }: { onCreated: (id: string) => void
     }
   };
 
+  const humanizeNewPrompt = async () => {
+    const value = newPrompt.trim();
+    if (!value) return;
+    setGenerateBusy(true);
+    setGenerateError("");
+    try {
+      const result = await admin.humanizePrompt(value);
+      setNewPrompt(result.system_prompt);
+    } catch (err) {
+      setGenerateError(err instanceof ApiError ? err.message : "No se pudo humanizar el prompt.");
+    } finally {
+      setGenerateBusy(false);
+    }
+  };
+
   const create = async () => {
     if (!newLabel.trim()) return;
     setCreateBusy(true);
@@ -654,6 +694,16 @@ function NewAgentForm({ onCreated, onCancel }: { onCreated: (id: string) => void
           >
             <Sparkles className="size-3" />
             {generateBusy ? "Generando..." : "Generar con IA"}
+          </button>
+          <button
+            type="button"
+            disabled={generateBusy || !newPrompt.trim()}
+            onClick={humanizeNewPrompt}
+            className="chip hover:text-[var(--text)]"
+            title="Reescribe el texto actual para que suene mas natural, sin cambiar lo que dice"
+          >
+            <Wand2 className="size-3" />
+            Humanizar
           </button>
         </div>
         {generateError && <p className="mt-1.5 text-[12px] text-red-500">{generateError}</p>}

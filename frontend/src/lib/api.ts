@@ -309,6 +309,11 @@ export const admin = {
       method: "POST",
       body: JSON.stringify({ description }),
     }),
+  humanizePrompt: (system_prompt: string) =>
+    adminRequest<{ system_prompt: string }>("/api/admin/telegram-agents/humanize-prompt", {
+      method: "POST",
+      body: JSON.stringify({ system_prompt }),
+    }),
 
   uploadTelegramAgentFile: (agentId: string, file: File) => {
     const form = new FormData();
