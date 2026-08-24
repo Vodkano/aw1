@@ -89,7 +89,16 @@ class PostgresRepository:
             return
         self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=10)
         raw = _SCHEMA.read_text(encoding="utf-8")
-        statements = [s.strip() for s in raw.split(";") if s.strip()]
+        # Las lineas de comentario ("-- ...") se sacan ANTES de partir por
+        # ";": un comentario en prosa normal casi siempre necesita alguna
+        # coma o punto y coma, y un ";" suelto ahi corta el statement a la
+        # mitad -paso real, tumbo el arranque en produccion una vez. Solo
+        # hay comentarios de linea completa en este archivo (nunca al final
+        # de una linea de SQL), asi que sacar la linea entera es seguro.
+        without_comments = "\n".join(
+            line for line in raw.splitlines() if not line.strip().startswith("--")
+        )
+        statements = [s.strip() for s in without_comments.split(";") if s.strip()]
         async with self._pool.acquire() as conn:
             for statement in statements:
                 await conn.execute(statement)

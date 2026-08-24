@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
 
 -- Panel admin: agentes de Telegram. Un agente es el "cerebro" (prompt,
 -- personalidad) -no es un bot en si, sino la logica que puede atender uno o
--- varios bots (ver telegram_tokens). Un agente puede tener muchos tokens;
--- un token es de un solo agente. El id es un uuid generado en la app. DDL
+-- varios bots (ver telegram_tokens). Un agente puede tener muchos tokens,
+-- y un token es de un solo agente. El id es un uuid generado en la app. DDL
 -- identico al de schema.sql: nada aca necesita sintaxis especifica de
 -- Postgres.
 CREATE TABLE IF NOT EXISTS telegram_agents (
