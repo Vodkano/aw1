@@ -13,7 +13,7 @@ from __future__ import annotations
 from ..settings import Settings
 from .secrets_store import SecretsStore
 
-__all__ = ["chat_model", "effective_provider", "judge_model", "openai_key"]
+__all__ = ["brave_key", "chat_model", "effective_provider", "judge_model", "openai_key"]
 
 
 def effective_provider(settings: Settings, secrets: SecretsStore) -> str:
@@ -29,6 +29,16 @@ def openai_key(settings: Settings, secrets: SecretsStore) -> str:
     if override:
         return override
     key = settings.openai_api_key
+    return key.get_secret_value() if key else ""
+
+
+def brave_key(settings: Settings, secrets: SecretsStore) -> str:
+    """Misma resolucion que openai_key (panel admin primero, entorno
+    despues), para la herramienta de busqueda web (@buscar)."""
+    override = secrets.get("brave_search_api_key")
+    if override:
+        return override
+    key = settings.brave_search_api_key
     return key.get_secret_value() if key else ""
 
 

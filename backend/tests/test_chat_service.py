@@ -120,6 +120,26 @@ async def test_history_hours_excludes_messages_outside_the_time_window(repo, tes
     assert "mensaje viejo" not in contents
 
 
+async def test_history_max_messages_caps_the_window_even_within_the_time_range(repo, test_settings):
+    """Tope duro de mensajes ademas del tiempo: una charla muy activa dentro
+    de la ventana no debe mandarle al modelo un historial gigante."""
+    conversation_id = "conv-activa"
+    await repo.ensure_conversation(conversation_id)
+    for i in range(5):
+        await repo.add_message(conversation_id, "user", f"mensaje {i}")
+
+    service, fake = await _build_service(repo, test_settings, None)
+    await _collect(
+        service.stream(
+            "hola", conversation_id=conversation_id, history_hours=48.0, history_max_messages=2,
+        )
+    )
+
+    contents = [item["content"] for item in fake.last_messages]
+    assert contents.count("mensaje 4") == 1
+    assert "mensaje 0" not in contents
+
+
 async def test_fast_route_skips_the_network_classification(repo, test_settings):
     """Los agentes de Telegram fuerzan fast_route: se salta route_chat (una
     llamada de red al modelo, hasta 25s si esta detras de un tunel lento) y

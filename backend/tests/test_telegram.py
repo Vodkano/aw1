@@ -263,12 +263,12 @@ class FakeChatService:
         self.answer = answer
 
     async def stream(self, message, *, conversation_id=None, system_prompt=None, force_gpt=False,
-                      history_hours=None, fast_route=False, agent_apis=None):
+                      history_hours=None, history_max_messages=60, fast_route=False, agent_apis=None):
         self.calls.append(
             {
                 "message": message, "system_prompt": system_prompt, "force_gpt": force_gpt,
-                "history_hours": history_hours, "fast_route": fast_route,
-                "agent_apis": agent_apis,
+                "history_hours": history_hours, "history_max_messages": history_max_messages,
+                "fast_route": fast_route, "agent_apis": agent_apis,
             }
         )
         from aw1.chat.events import ChatEvent
@@ -349,7 +349,8 @@ async def test_a_message_without_urls_goes_through_the_normal_chat_path(repo, te
     assert len(chat.calls) == 1
     call = chat.calls[0]
     assert call["force_gpt"] is True
-    assert call["history_hours"] == 48.0
+    assert call["history_hours"] == 72.0
+    assert call["history_max_messages"] == 120
     assert call["fast_route"] is True
     # El prompt final es base + personalidad + lo propio del agente, no solo
     # lo que escribio el admin.

@@ -73,6 +73,7 @@ class AdminConfig(BaseModel):
     ollama_host: str
     groq_configured: bool
     openai_configured: bool
+    brave_configured: bool
 
 
 class TestSecretResult(BaseModel):

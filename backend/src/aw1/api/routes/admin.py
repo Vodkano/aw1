@@ -13,7 +13,7 @@ from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 
-from ...core import llm_provider
+from ...core import llm_provider, websearch
 from ...core.errors import NotFoundError, ProviderError, ValidationError
 from ..deps import Container, container
 from ..schemas import (
@@ -50,7 +50,10 @@ router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(re
 # Las unicas claves que el panel puede leer/escribir: nunca un nombre libre,
 # para no convertir esto en un almacen generico de lo que sea.
 ALLOWED_SECRETS = frozenset(
-    {"openai_api_key", "groq_api_key", "ollama_host", "ollama_tunnel_key", "llm_provider"}
+    {
+        "openai_api_key", "groq_api_key", "ollama_host", "ollama_tunnel_key", "llm_provider",
+        "brave_search_api_key",
+    }
 )
 
 
@@ -82,6 +85,7 @@ def _config_snapshot(box: Container) -> AdminConfig:
         ollama_host=box.secrets.get("ollama_host") or box.settings.ollama_host,
         groq_configured=bool(groq_key.strip()),
         openai_configured=box.chat.gpt_configured(),
+        brave_configured=bool(llm_provider.brave_key(box.settings, box.secrets).strip()),
     )
 
 
@@ -118,6 +122,14 @@ async def test_config(
         return await _test_provider_key(payload.value, box.settings.openai_base_url)
     if name == "groq_api_key":
         return await _test_provider_key(payload.value, box.settings.groq_base_url)
+    if name == "brave_search_api_key":
+        try:
+            await websearch.search(
+                "chile", api_key=payload.value, base_url=box.settings.brave_search_base_url, count=1
+            )
+        except (httpx.HTTPError, RuntimeError) as error:
+            return TestSecretResult(ok=False, detail=f"Brave Search rechazo la clave. {error}".strip())
+        return TestSecretResult(ok=True, detail="Clave valida.")
     raise ValidationError(f"Esta clave no se puede probar: {name}")
 
 

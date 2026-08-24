@@ -159,6 +159,7 @@ class ChatService:
         system_prompt: str | None = None,
         force_gpt: bool = False,
         history_hours: float | None = None,
+        history_max_messages: int = 60,
         fast_route: bool = False,
         agent_apis: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
@@ -178,7 +179,9 @@ class ChatService:
 
         if history_hours is not None:
             since = datetime.now(UTC) - timedelta(hours=history_hours)
-            history = await self._repo.history_since(conversation, since.isoformat())
+            history = await self._repo.history_since(
+                conversation, since.isoformat(), max_messages=history_max_messages
+            )
         else:
             history = await self._repo.history(conversation, self._settings.max_history_turns)
 

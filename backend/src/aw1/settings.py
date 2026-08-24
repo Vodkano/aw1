@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = "https://api.openai.com/v1"
 
+    # -- busqueda web opcional (herramienta @buscar) -------------------------
+    # Brave Search API: clave simple (un solo header), tiene capa gratuita, y
+    # no depende de un motor de busqueda "custom" aparte como Google CSE. Sin
+    # esto configurado la herramienta @buscar avisa que falta la clave, igual
+    # que GPT sin AW1_OPENAI_API_KEY.
+    brave_search_api_key: SecretStr | None = None
+    brave_search_base_url: str = "https://api.search.brave.com/res/v1/web/search"
+
     # -- navegador ----------------------------------------------------------
     browser_headless: bool = True
     browser_max_contexts: int = Field(default=3, ge=1, le=12)
@@ -129,6 +137,14 @@ class Settings(BaseSettings):
     # -- memoria ------------------------------------------------------------
     max_history_turns: int = Field(default=10, ge=0, le=50)
     max_saved_items: int = Field(default=500, ge=1)
+    # Memoria de corto plazo de los bots de Telegram: cuantas horas hacia
+    # atras se manda como contexto, con un tope duro de mensajes ademas del
+    # tiempo (una charla muy activa no debe mandarle al modelo un historial
+    # gigante). El chat web usa max_history_turns en su lugar -distinto por
+    # diseno, Telegram es una charla que sigue horas o dias, el chat web
+    # suele ser una sesion mas acotada.
+    telegram_history_hours: float = Field(default=72.0, ge=1.0, le=720.0)
+    telegram_history_max_messages: int = Field(default=120, ge=1, le=500)
 
     # -- Telegram -------------------------------------------------------------
     # URL publica y estable de esta instancia (ej. https://app.aw1s.online),

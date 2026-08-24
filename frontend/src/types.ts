@@ -120,6 +120,7 @@ export interface AdminConfig {
   ollama_host: string;
   groq_configured: boolean;
   openai_configured: boolean;
+  brave_configured: boolean;
 }
 
 export interface ApiKeySummary {

@@ -11,6 +11,7 @@ from ..browser.pool import BrowserPool
 from ..chat.service import ChatService
 from ..chat.tools.base import ToolRegistry
 from ..chat.tools.prices import PriceSearchTool
+from ..chat.tools.websearch import WebSearchTool
 from ..chat.wikipedia import Wikipedia
 from ..core import llm_provider
 from ..core.api_keys_store import ApiKeyStore
@@ -84,7 +85,7 @@ class Container:
         prices = PricePipeline(
             settings=settings, browser=browser, judges=judges, repository=repo
         )
-        tools = ToolRegistry([PriceSearchTool(prices)])
+        tools = ToolRegistry([PriceSearchTool(prices), WebSearchTool(settings, secrets)])
         chat = ChatService(
             settings=settings, repository=repo, llm=llm, judges=judges,
             wikipedia=wikipedia, secrets=secrets, tools=tools,

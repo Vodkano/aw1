@@ -416,6 +416,23 @@ export function AdminView() {
           />
         </section>
 
+        <section className="card mt-4 p-5">
+          <h2 className="text-[15px] font-semibold">Busqueda web (@buscar)</h2>
+          <p className="mt-1 text-[13px] muted">
+            Herramienta del chat para buscar en cualquier sitio -descripciones de producto,
+            comparativas, noticias- ademas de la comparacion de precios en tiendas chilenas.
+            Se invoca escribiendo <code className="font-mono">@buscar</code> en el chat.
+          </p>
+          <Field
+            label="Clave de Brave Search"
+            hint="brave.com/search/api"
+            configured={!!config?.brave_configured}
+            onSave={async (value) => setConfig(await admin.setSecret("brave_search_api_key", value))}
+            onClear={async () => setConfig(await admin.deleteSecret("brave_search_api_key"))}
+            onTest={(value) => admin.testSecret("brave_search_api_key", value)}
+          />
+        </section>
+
         <ApiKeysCard />
       </div>
     </div>

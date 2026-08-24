@@ -184,16 +184,19 @@ class TelegramOrchestrator:
                 try:
                     # force_gpt: los agentes de Telegram usan GPT siempre,
                     # sin la heuristica "Ollama primero" de la web.
-                    # history_hours: memoria por chat limitada a las
-                    # ultimas 48h. fast_route: se salta la clasificacion
-                    # por IA (viaja a Ollama, tunel incluido, hasta 25s)
-                    # -era el principal cuello de botella de latencia del
-                    # bot, y con force_gpt esa clasificacion ya no decide
-                    # nada sobre que modelo responde.
+                    # history_hours/history_max_messages: memoria de corto
+                    # plazo por chat, configurable
+                    # (AW1_TELEGRAM_HISTORY_HOURS/_MAX_MESSAGES). fast_route:
+                    # se salta la clasificacion por IA (viaja a Ollama, tunel
+                    # incluido, hasta 25s) -era el principal cuello de
+                    # botella de latencia del bot, y con force_gpt esa
+                    # clasificacion ya no decide nada sobre que modelo
+                    # responde.
                     async for event in self._chat.stream(
                         text, conversation_id=conversation_id, system_prompt=system_prompt,
-                        force_gpt=True, history_hours=48.0, fast_route=True,
-                        agent_apis=token.get("apis") or None,
+                        force_gpt=True, history_hours=self._settings.telegram_history_hours,
+                        history_max_messages=self._settings.telegram_history_max_messages,
+                        fast_route=True, agent_apis=token.get("apis") or None,
                     ):
                         if event.type == "done":
                             answer = str(event.data.get("answer", ""))
