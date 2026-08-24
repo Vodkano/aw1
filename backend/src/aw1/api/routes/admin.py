@@ -259,6 +259,30 @@ async def delete_telegram_token(
         raise NotFoundError("Ese bot no existe.")
 
 
+_PROMPT_WRITER_SYSTEM = """\
+Escribes la parte PROPIA de un agente de Telegram, en espanol -no un prompt
+completo desde cero. Ya existe una base compartida que cubre tono humano,
+calidez, actitud pro-cliente y limites generales de conducta: no la
+repitas. Enfocate solo en lo especifico de este agente a partir de la
+descripcion que te den:
+
+- Para que sirve exactamente y que temas puede resolver.
+- Que informacion o pasos necesita pedirle a la persona para ayudar.
+- Donde termina su alcance (que deriva a un humano o simplemente no puede
+  hacer).
+
+Regla mas importante: NUNCA describas una accion que el agente en realidad
+no puede ejecutar -guardar algo en una base de datos, consultar un sistema
+externo, agendar, enviar un correo, cobrar un pago- salvo que la
+descripcion lo mencione explicitamente como algo real. Si el agente solo
+puede conversar y dar informacion, el prompt tiene que dejar eso claro,
+nunca simular una funcionalidad que no existe: eso termina con el agente
+prometiendo cosas que despues no puede cumplir.
+
+Responde SOLO con el texto del prompt, sin explicaciones ni comillas.
+"""
+
+
 async def _draft_system_prompt(description: str, box: Container) -> str:
     """Un prompt de sistema listo para un bot de Telegram, a partir de una
     descripcion corta. No es un turno de ChatService.stream() -eso traeria
@@ -270,16 +294,7 @@ async def _draft_system_prompt(description: str, box: Container) -> str:
     payload = {
         "model": box.settings.openai_model,
         "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Escribes prompts de sistema para bots de Telegram en espanol, "
-                    "breves, claros y accionables. A partir de una descripcion corta "
-                    "del proposito del bot, redacta un system prompt completo y listo "
-                    "para usar -tono, limites, que hacer y que no hacer. Responde SOLO "
-                    "con el texto del prompt, sin explicaciones ni comillas."
-                ),
-            },
+            {"role": "system", "content": _PROMPT_WRITER_SYSTEM},
             {"role": "user", "content": description[:500]},
         ],
         "temperature": 0.6,

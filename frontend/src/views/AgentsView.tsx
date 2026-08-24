@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
-import { ChevronDown, Sparkles, Trash2, Plus } from "lucide-react";
+import { ChevronDown, Sparkles, Trash2, Plus, X } from "lucide-react";
 import { admin, ApiError, getAdminPassword, setAdminPassword } from "../lib/api";
 import { PasswordGate } from "../components/PasswordGate";
 import type { TelegramAgentSummary, TelegramTokenSummary } from "../types";
 
-const PERSONALITY_LABELS: Record<string, string> = {
-  calida: "Camila · cercana y calida",
-  directa: "Javiera · directa y eficiente",
-  entusiasta: "Antonia · entusiasta y positiva",
+const PERSONALITY_NAMES: Record<string, string> = {
+  calida: "Camila",
+  directa: "Javiera",
+  entusiasta: "Antonia",
 };
 
 function TokenRow({
@@ -144,12 +144,14 @@ function AgentRow({
     setPrompt(agent.system_prompt);
   }, [agent.label, agent.system_prompt]);
 
+  const dirty = label.trim() !== agent.label || prompt !== agent.system_prompt;
+
   const save = async (changes: Partial<{ label: string; system_prompt: string; enabled: boolean }>) => {
     setBusy(true);
     setError("");
     try {
       await admin.updateTelegramAgent(agent.id, {
-        label: changes.label ?? label,
+        label: changes.label ?? label.trim() ?? agent.label,
         system_prompt: changes.system_prompt ?? prompt,
         enabled: changes.enabled ?? agent.enabled,
       });
@@ -185,87 +187,102 @@ function AgentRow({
 
   return (
     <div className="border-b hairline py-2.5 last:border-b-0">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-2.5 text-left text-[13px]"
-      >
-        <ChevronDown className={clsx("size-3.5 shrink-0 transition-transform", expanded && "rotate-180")} />
-        <span className={clsx("size-1.5 shrink-0 rounded-full", agent.enabled ? "bg-accent-500" : "bg-ink-400")} />
-        <span className="font-medium">{agent.label}</span>
-        <span className="muted text-[12px]">
-          {agent.tokens.length} bot{agent.tokens.length === 1 ? "" : "s"} ·{" "}
-          {PERSONALITY_LABELS[agent.personality] ?? agent.personality}
-        </span>
-      </button>
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-[13px]"
+        >
+          <ChevronDown className={clsx("size-3.5 shrink-0 transition-transform", expanded && "rotate-180")} />
+          <span className={clsx("size-1.5 shrink-0 rounded-full", agent.enabled ? "bg-accent-500" : "bg-ink-400")} />
+          <span className="truncate font-medium">{agent.label}</span>
+          <span className="chip shrink-0 font-mono">
+            {PERSONALITY_NAMES[agent.personality] ?? agent.personality}
+          </span>
+          <span className="muted hidden shrink-0 text-[12px] sm:inline">
+            {agent.tokens.length} bot{agent.tokens.length === 1 ? "" : "s"}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={remove}
+          aria-label="Borrar agente"
+          className="btn btn-ghost size-7 shrink-0 p-0 hover:border-red-400 hover:text-red-500"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
 
       {expanded && (
-        <div className="mt-3 space-y-3 pl-6">
-          <div className="flex gap-2">
+        <div className="mt-3 space-y-4 pl-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
             <input
               value={label}
               onChange={(event) => setLabel(event.target.value)}
               placeholder="Nombre"
-              className="input"
+              className="input sm:max-w-56"
             />
-            <button
-              type="button"
-              disabled={busy || !label.trim() || label === agent.label}
-              onClick={() => save({ label: label.trim() })}
-              className="btn btn-ghost shrink-0 px-3 py-1.5 text-[13px]"
-            >
-              Guardar
-            </button>
-          </div>
-
-          <div>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              rows={4}
-              placeholder="Personalidad del agente (system prompt)..."
-              className="input w-full resize-y"
-            />
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowGenerate((value) => !value)}
-                className="chip hover:text-[var(--text)]"
-              >
-                <Sparkles className="size-3" />
-                Generar con IA
-              </button>
-              <button
-                type="button"
-                disabled={busy || prompt === agent.system_prompt}
-                onClick={() => save({ system_prompt: prompt })}
-                className="btn btn-primary px-3 py-1 text-[12.5px]"
-              >
-                Guardar prompt
-              </button>
-            </div>
-            {showGenerate && (
-              <div className="mt-2 flex gap-2">
-                <input
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="Describe el agente en una frase..."
-                  className="input"
-                />
+            <div className="flex-1">
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                rows={4}
+                placeholder="Instrucciones propias del agente (system prompt)..."
+                className="input w-full resize-y"
+              />
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  disabled={busy || !description.trim()}
-                  onClick={generate}
-                  className="btn btn-ghost shrink-0 px-3 py-1.5 text-[13px]"
+                  onClick={() => setShowGenerate((value) => !value)}
+                  className="chip hover:text-[var(--text)]"
                 >
-                  Generar
+                  <Sparkles className="size-3" />
+                  Generar con IA
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !dirty}
+                  onClick={() => save({})}
+                  className="btn btn-primary ml-auto px-3 py-1 text-[12.5px]"
+                >
+                  Guardar cambios
                 </button>
               </div>
-            )}
+              {showGenerate && (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder="Describe el agente en una frase..."
+                    className="input"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !description.trim()}
+                    onClick={generate}
+                    className="btn btn-ghost shrink-0 px-3 py-1.5 text-[13px]"
+                  >
+                    Generar
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
-          <div>
-            <p className="text-[12px] font-medium uppercase tracking-wide muted">Bots de Telegram</p>
+          <div className="surface-soft rounded-[var(--radius-md)] p-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-medium uppercase tracking-wide muted">
+                Bots de Telegram
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => save({ enabled: !agent.enabled })}
+                className="chip hover:text-[var(--text)]"
+              >
+                {agent.enabled ? "Agente activo" : "Agente inactivo"}
+              </button>
+            </div>
             {agent.tokens.length === 0 && (
               <p className="mt-1 text-[12.5px] muted">Este agente todavia no tiene ningun bot.</p>
             )}
@@ -275,24 +292,6 @@ function AgentRow({
             <AddTokenForm agentId={agent.id} onAdded={onChanged} />
           </div>
 
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => save({ enabled: !agent.enabled })}
-              className="chip hover:text-[var(--text)]"
-            >
-              {agent.enabled ? "Activo · click para desactivar" : "Inactivo · click para activar"}
-            </button>
-            <button
-              type="button"
-              onClick={remove}
-              aria-label="Borrar agente"
-              className="btn btn-ghost size-7 p-0 hover:border-red-400 hover:text-red-500"
-            >
-              <Trash2 className="size-3.5" />
-            </button>
-          </div>
           {error && <p className="text-[12px] text-red-500">{error}</p>}
         </div>
       )}
@@ -300,9 +299,7 @@ function AgentRow({
   );
 }
 
-function TelegramAgentsCard() {
-  const [agents, setAgents] = useState<TelegramAgentSummary[] | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+function NewAgentForm({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel?: () => void }) {
   const [newLabel, setNewLabel] = useState("");
   const [newToken, setNewToken] = useState("");
   const [newPrompt, setNewPrompt] = useState("");
@@ -311,11 +308,6 @@ function TelegramAgentsCard() {
   const [generateError, setGenerateError] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
-
-  const load = () => admin.telegramAgents().then(setAgents).catch(() => setAgents([]));
-  useEffect(() => {
-    load();
-  }, []);
 
   const generateNewPrompt = async () => {
     const value = newDescription.trim();
@@ -340,12 +332,7 @@ function TelegramAgentsCard() {
       const row = await admin.createTelegramAgent({
         label: newLabel.trim(), system_prompt: newPrompt.trim(), bot_token: newToken.trim(),
       });
-      setNewLabel("");
-      setNewToken("");
-      setNewPrompt("");
-      setNewDescription("");
-      setExpandedId(row.id);
-      load();
+      onCreated(row.id);
     } catch (err) {
       setCreateError(err instanceof ApiError ? err.message : "No se pudo crear el agente.");
     } finally {
@@ -354,9 +341,8 @@ function TelegramAgentsCard() {
   };
 
   return (
-    <section className="card mt-7 p-5">
-      <h2 className="text-[15px] font-semibold">Nuevo agente</h2>
-      <p className="mt-1 text-[13px] muted">
+    <div className="mt-4 border-t hairline pt-4">
+      <p className="text-[13px] muted">
         Un agente es su prompt y personalidad (elegida al azar entre 3 al crearlo). Puede atender
         uno o varios bots de Telegram a la vez -pegale un primer token aca, o agregaselo despues.
         Necesita <code className="font-mono">AW1_PUBLIC_BASE_URL</code> configurado para
@@ -407,19 +393,65 @@ function TelegramAgentsCard() {
         {generateError && <p className="mt-1.5 text-[12px] text-red-500">{generateError}</p>}
       </div>
 
-      <button
-        type="button"
-        disabled={createBusy || !newLabel.trim()}
-        onClick={create}
-        className="btn btn-primary mt-3 px-4 py-1.5 text-[13px]"
-      >
-        {createBusy ? "Creando..." : "Crear agente"}
-      </button>
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          disabled={createBusy || !newLabel.trim()}
+          onClick={create}
+          className="btn btn-primary px-4 py-1.5 text-[13px]"
+        >
+          {createBusy ? "Creando..." : "Crear agente"}
+        </button>
+        {onCancel && (
+          <button type="button" onClick={onCancel} className="btn btn-ghost px-3 py-1.5 text-[13px]">
+            Cancelar
+          </button>
+        )}
+      </div>
       {createError && <p className="mt-2 text-[12.5px] text-red-500">{createError}</p>}
+    </div>
+  );
+}
 
-      <div className="mt-4">
+function TelegramAgentsCard() {
+  const [agents, setAgents] = useState<TelegramAgentSummary[] | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showNewForm, setShowNewForm] = useState(false);
+
+  const load = () => admin.telegramAgents().then(setAgents).catch(() => setAgents([]));
+  useEffect(() => {
+    load();
+  }, []);
+
+  const onCreated = (id: string) => {
+    setShowNewForm(false);
+    setExpandedId(id);
+    load();
+  };
+
+  const noAgentsYet = agents?.length === 0;
+
+  return (
+    <section className="card mt-7 p-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[15px] font-semibold">Agentes</h2>
+        {!showNewForm && (
+          <button
+            type="button"
+            onClick={() => setShowNewForm(true)}
+            className="btn btn-primary px-3 py-1.5 text-[13px]"
+          >
+            <Plus className="size-3.5" />
+            Nuevo agente
+          </button>
+        )}
+      </div>
+
+      <div className="mt-1">
         {agents === null && <p className="text-[13px] muted">Cargando...</p>}
-        {agents?.length === 0 && <p className="text-[13px] muted">Ningun agente creado todavia.</p>}
+        {noAgentsYet && !showNewForm && (
+          <p className="mt-2 text-[13px] muted">Ningun agente creado todavia.</p>
+        )}
         {agents?.map((agent) => (
           <AgentRow
             key={agent.id}
@@ -430,6 +462,22 @@ function TelegramAgentsCard() {
           />
         ))}
       </div>
+
+      {showNewForm && (
+        <div className="relative">
+          {!noAgentsYet && (
+            <button
+              type="button"
+              onClick={() => setShowNewForm(false)}
+              aria-label="Cerrar"
+              className="btn btn-ghost absolute right-0 top-3 size-6 p-0"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+          <NewAgentForm onCreated={onCreated} onCancel={!noAgentsYet ? () => setShowNewForm(false) : undefined} />
+        </div>
+      )}
     </section>
   );
 }
