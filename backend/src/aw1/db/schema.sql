@@ -72,20 +72,68 @@ CREATE TABLE IF NOT EXISTS api_keys (
     created_at  TEXT NOT NULL
 );
 
--- Panel admin: perfiles de Telegram. Cada perfil ES un bot de Telegram
--- independiente (su propio token de BotFather), alimentado desde el panel
--- admin. El id es un uuid generado en la app (no autoincrement) porque
--- aparece en la URL publica del webhook (/api/telegram/webhook/{id}),
--- igual que conversations.id.
-CREATE TABLE IF NOT EXISTS telegram_profiles (
+-- Panel admin: agentes de Telegram. Un agente es el "cerebro" (prompt,
+-- personalidad) -no es un bot en si, sino la logica que puede atender uno o
+-- varios bots (ver telegram_tokens). Un agente puede tener muchos tokens;
+-- un token es de un solo agente. El id es un uuid generado en la app.
+CREATE TABLE IF NOT EXISTS telegram_agents (
     id              TEXT PRIMARY KEY,
     label           TEXT NOT NULL,
-    bot_token       TEXT NOT NULL,
-    bot_token_hash  TEXT NOT NULL UNIQUE,
-    bot_username    TEXT NOT NULL DEFAULT '',
-    webhook_secret  TEXT NOT NULL,
     system_prompt   TEXT NOT NULL DEFAULT '',
+    -- Una de TELEGRAM_PERSONALITIES (llm/prompts.py), sorteada al crear el
+    -- agente y fija desde entonces: le da variedad de "voz" a los agentes
+    -- sin que el admin tenga que elegir una a mano.
+    personality     TEXT NOT NULL DEFAULT '',
     enabled         INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
+
+-- Un token de bot de Telegram (BotFather), enganchado a exactamente un
+-- agente. El id (no el token en si) es lo que aparece en la URL publica del
+-- webhook (/api/telegram/webhook/{token_id}), igual que conversations.id.
+CREATE TABLE IF NOT EXISTS telegram_tokens (
+    id              TEXT PRIMARY KEY,
+    agent_id        TEXT NOT NULL REFERENCES telegram_agents(id) ON DELETE CASCADE,
+    bot_token       TEXT NOT NULL,
+    bot_token_hash  TEXT NOT NULL UNIQUE,
+    bot_username    TEXT NOT NULL DEFAULT '',
+    webhook_secret  TEXT NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_tokens_agent ON telegram_tokens(agent_id);
+
+-- Corte de conversacion: cuando un agente detecta mala intencion (abuso,
+-- spam, intento de manipularlo) deja de gastar tokens en ese chat por un
+-- tiempo -los mensajes que lleguen mientras dure el "mute" se responden con
+-- un texto fijo, sin llamar al modelo. Por token (bot), no por agente: la
+-- memoria/conversacion tambien es separada por bot, aunque compartan
+-- personalidad.
+CREATE TABLE IF NOT EXISTS telegram_mutes (
+    token_id     TEXT NOT NULL REFERENCES telegram_tokens(id) ON DELETE CASCADE,
+    chat_id      TEXT NOT NULL,
+    reason       TEXT NOT NULL DEFAULT '',
+    muted_until  TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (token_id, chat_id)
+);
+
+-- Seguimiento de precio: un producto + N URLs (distintas tiendas) que un
+-- bot de Telegram revisa periodicamente, avisando solo cuando cambia cual
+-- es la oferta mas barata (precio o tienda distintos a la ultima vez). Por
+-- token, no por agente -mismo motivo que telegram_mutes.
+CREATE TABLE IF NOT EXISTS price_watches (
+    id              TEXT PRIMARY KEY,
+    token_id        TEXT NOT NULL REFERENCES telegram_tokens(id) ON DELETE CASCADE,
+    chat_id         TEXT NOT NULL,
+    product_label   TEXT NOT NULL,
+    urls            TEXT NOT NULL,
+    last_price_clp  REAL,
+    last_best_url   TEXT,
+    last_checked_at TEXT,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_price_watches_enabled ON price_watches(enabled);

@@ -166,3 +166,23 @@ async def test_the_search_is_recorded_in_history(settings, browser, repo):
     history = await repo.recent_searches()
     assert history
     assert history[0]["query"] == "zeta 12 256gb"
+
+
+async def test_read_price_reads_one_url_the_user_already_chose(settings, browser):
+    """Lo usa el seguimiento de precios de los bots de Telegram: la persona
+    ya eligio la pagina (no hay busqueda ni plan de por medio), asi que
+    read_price debe leer el precio directo con solo la URL."""
+    llm = fakes.FakeOllama(
+        json_by_marker={fakes.PAGE_MARKER: fakes.choose_candidate("Precio internet")}
+    )
+    pipeline = make_pipeline(settings, browser, llm=llm)
+    offer = await pipeline.read_price(f"{settings.demo_store_url}/producto/1", "Zeta 12")
+    assert offer is not None
+    assert offer.price_clp == 549990.0
+
+
+async def test_read_price_returns_none_for_a_page_without_a_clear_price(settings, browser):
+    llm = fakes.FakeOllama(json_by_marker={fakes.PAGE_MARKER: fakes.choose_candidate("nada")})
+    pipeline = make_pipeline(settings, browser, llm=llm)
+    offer = await pipeline.read_price(f"{settings.demo_store_url}/producto/1", "Zeta 12")
+    assert offer is None

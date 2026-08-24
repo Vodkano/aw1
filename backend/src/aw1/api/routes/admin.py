@@ -22,14 +22,16 @@ from ..schemas import (
     ApiKeyCreated,
     ApiKeySummary,
     CreateApiKeyRequest,
-    CreateTelegramProfileRequest,
+    CreateTelegramAgentRequest,
+    CreateTelegramTokenRequest,
     GeneratedPromptResult,
     GeneratePromptRequest,
     SetSecretRequest,
-    TelegramProfileDetail,
-    TelegramProfileSummary,
+    TelegramAgentSummary,
+    TelegramTokenCreated,
     TestSecretResult,
-    UpdateTelegramProfileRequest,
+    UpdateTelegramAgentRequest,
+    UpdateTelegramTokenRequest,
 )
 from ..security import check_admin
 
@@ -159,58 +161,102 @@ async def delete_api_key(key_id: int, box: Container = Depends(container)) -> No
         raise NotFoundError("Esa clave no existe.")
 
 
-# -- perfiles de Telegram: cada uno ES un bot independiente -----------------
-@router.get("/telegram-profiles", response_model=list[TelegramProfileSummary])
-async def list_telegram_profiles(
-    box: Container = Depends(container),
-) -> list[TelegramProfileSummary]:
-    return [TelegramProfileSummary(**row) for row in box.telegram_profiles.list()]
+# -- agentes de Telegram: el "cerebro" (prompt, personalidad) ---------------
+# Un agente puede tener varios tokens (bots); un token es de un solo agente
+# -ver core/telegram_store.py.
+@router.get("/telegram-agents", response_model=list[TelegramAgentSummary])
+async def list_telegram_agents(box: Container = Depends(container)) -> list[TelegramAgentSummary]:
+    return [TelegramAgentSummary(**row) for row in box.telegram_store.list_agents()]
 
 
-@router.post("/telegram-profiles", response_model=TelegramProfileDetail, status_code=201)
-async def create_telegram_profile(
-    payload: CreateTelegramProfileRequest, box: Container = Depends(container)
-) -> TelegramProfileDetail:
-    row = await box.telegram_profiles.create(
-        label=payload.label, bot_token=payload.bot_token, system_prompt=payload.system_prompt,
+@router.post("/telegram-agents", response_model=TelegramAgentSummary, status_code=201)
+async def create_telegram_agent(
+    payload: CreateTelegramAgentRequest, box: Container = Depends(container)
+) -> TelegramAgentSummary:
+    row = await box.telegram_store.create_agent(
+        label=payload.label, system_prompt=payload.system_prompt
     )
-    return TelegramProfileDetail(**row)
+    if payload.bot_token.strip():
+        try:
+            await box.telegram_store.create_token(row["id"], payload.bot_token)
+        except Exception:
+            # No dejar un agente huerfano (sin ningun bot y sin forma facil
+            # de agregarle uno desde el formulario de creacion) si el token
+            # que se dio junto con el agente no sirve.
+            await box.telegram_store.delete_agent(row["id"])
+            raise
+    agent = await box.telegram_store.get_agent(row["id"])
+    assert agent is not None
+    return TelegramAgentSummary(**agent)
 
 
-@router.get("/telegram-profiles/{profile_id}", response_model=TelegramProfileDetail)
-async def get_telegram_profile(
-    profile_id: str, box: Container = Depends(container)
-) -> TelegramProfileDetail:
-    row = await box.telegram_profiles.get(profile_id)
+@router.get("/telegram-agents/{agent_id}", response_model=TelegramAgentSummary)
+async def get_telegram_agent(
+    agent_id: str, box: Container = Depends(container)
+) -> TelegramAgentSummary:
+    row = await box.telegram_store.get_agent(agent_id)
     if row is None:
-        raise NotFoundError("Ese perfil no existe.")
-    return TelegramProfileDetail(**row)
+        raise NotFoundError("Ese agente no existe.")
+    return TelegramAgentSummary(**row)
 
 
-@router.put("/telegram-profiles/{profile_id}", response_model=TelegramProfileDetail)
-async def update_telegram_profile(
-    profile_id: str, payload: UpdateTelegramProfileRequest, box: Container = Depends(container)
-) -> TelegramProfileDetail:
-    row = await box.telegram_profiles.update(
-        profile_id, label=payload.label, bot_token=payload.bot_token,
-        system_prompt=payload.system_prompt, enabled=payload.enabled,
+@router.put("/telegram-agents/{agent_id}", response_model=TelegramAgentSummary)
+async def update_telegram_agent(
+    agent_id: str, payload: UpdateTelegramAgentRequest, box: Container = Depends(container)
+) -> TelegramAgentSummary:
+    row = await box.telegram_store.update_agent(
+        agent_id, label=payload.label, system_prompt=payload.system_prompt,
+        enabled=payload.enabled,
     )
     if row is None:
-        raise NotFoundError("Ese perfil no existe.")
-    return TelegramProfileDetail(**row)
+        raise NotFoundError("Ese agente no existe.")
+    return TelegramAgentSummary(**row)
 
 
-@router.delete("/telegram-profiles/{profile_id}", status_code=204)
-async def delete_telegram_profile(profile_id: str, box: Container = Depends(container)) -> None:
-    if not await box.telegram_profiles.delete(profile_id):
-        raise NotFoundError("Ese perfil no existe.")
+@router.delete("/telegram-agents/{agent_id}", status_code=204)
+async def delete_telegram_agent(agent_id: str, box: Container = Depends(container)) -> None:
+    if not await box.telegram_store.delete_agent(agent_id):
+        raise NotFoundError("Ese agente no existe.")
 
 
-@router.post("/telegram-profiles/test-token", response_model=TestSecretResult)
+@router.post("/telegram-agents/test-token", response_model=TestSecretResult)
 async def test_telegram_token(
     payload: SetSecretRequest, box: Container = Depends(container)
 ) -> TestSecretResult:
-    return TestSecretResult(**await box.telegram_profiles.test_token(payload.value))
+    return TestSecretResult(**await box.telegram_store.test_token(payload.value))
+
+
+# -- tokens de Telegram: un bot (BotFather) enganchado a un agente ----------
+@router.post(
+    "/telegram-agents/{agent_id}/tokens", response_model=TelegramTokenCreated, status_code=201
+)
+async def create_telegram_token(
+    agent_id: str, payload: CreateTelegramTokenRequest, box: Container = Depends(container)
+) -> TelegramTokenCreated:
+    row = await box.telegram_store.create_token(agent_id, payload.bot_token)
+    return TelegramTokenCreated(**row)
+
+
+@router.put("/telegram-agents/{agent_id}/tokens/{token_id}", response_model=TelegramTokenCreated)
+async def update_telegram_token(
+    agent_id: str, token_id: str, payload: UpdateTelegramTokenRequest,
+    box: Container = Depends(container),
+) -> TelegramTokenCreated:
+    row = await box.telegram_store.set_token_enabled(token_id, payload.enabled)
+    if row is None or row["agent_id"] != agent_id:
+        raise NotFoundError("Ese bot no existe.")
+    return TelegramTokenCreated(**row, webhook_registered=True)
+
+
+@router.delete("/telegram-agents/{agent_id}/tokens/{token_id}", status_code=204)
+async def delete_telegram_token(
+    agent_id: str, token_id: str, box: Container = Depends(container)
+) -> None:
+    current = await box.telegram_store.get_agent(agent_id)
+    if current is None or not any(item["id"] == token_id for item in current["tokens"]):
+        raise NotFoundError("Ese bot no existe.")
+    if not await box.telegram_store.delete_token(token_id):
+        raise NotFoundError("Ese bot no existe.")
 
 
 async def _draft_system_prompt(description: str, box: Container) -> str:
@@ -253,7 +299,7 @@ async def _draft_system_prompt(description: str, box: Container) -> str:
     return str(response.json()["choices"][0]["message"]["content"]).strip()
 
 
-@router.post("/telegram-profiles/generate-prompt", response_model=GeneratedPromptResult)
+@router.post("/telegram-agents/generate-prompt", response_model=GeneratedPromptResult)
 async def generate_prompt(
     payload: GeneratePromptRequest, box: Container = Depends(container)
 ) -> GeneratedPromptResult:

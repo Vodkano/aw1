@@ -108,32 +108,60 @@ class AdminStatus(BaseModel):
     saved_items: int
 
 
-class CreateTelegramProfileRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    label: str = Field(min_length=1, max_length=80)
-    bot_token: str = Field(min_length=10, max_length=200)
-    system_prompt: str = Field(default="", max_length=4000)
-
-
-class UpdateTelegramProfileRequest(CreateTelegramProfileRequest):
-    enabled: bool = True
-
-
-class TelegramProfileSummary(BaseModel):
+class TelegramTokenSummary(BaseModel):
     id: str
-    label: str
+    agent_id: str
     bot_username: str
     token_preview: str
-    system_prompt: str
     enabled: bool
     created_at: datetime
     updated_at: datetime
 
 
-class TelegramProfileDetail(TelegramProfileSummary):
-    bot_token: str
+class TelegramTokenCreated(TelegramTokenSummary):
     webhook_registered: bool = True
+
+
+class CreateTelegramTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bot_token: str = Field(min_length=10, max_length=200)
+
+
+class UpdateTelegramTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+
+
+class CreateTelegramAgentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=80)
+    system_prompt: str = Field(default="", max_length=4000)
+    # Opcional: crea de una el primer bot de este agente. Un agente puede
+    # tener mas de un token -los siguientes se agregan aparte, ver
+    # POST /admin/telegram-agents/{agent_id}/tokens.
+    bot_token: str = Field(default="", max_length=200)
+
+
+class UpdateTelegramAgentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=80)
+    system_prompt: str = Field(default="", max_length=4000)
+    enabled: bool = True
+
+
+class TelegramAgentSummary(BaseModel):
+    id: str
+    label: str
+    system_prompt: str
+    personality: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    tokens: list[TelegramTokenSummary] = Field(default_factory=list)
 
 
 class GeneratePromptRequest(BaseModel):

@@ -50,6 +50,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # El navegador tarda ~1 s en arrancar: se hace en segundo plano para no
         # bloquear el arranque del servidor.
         app.state.browser_task = asyncio.create_task(box.browser.start())
+        # Chequeo periodico de los seguimientos de precio de los bots de
+        # Telegram: mismo patron que browser_task, pero este loop no termina
+        # -corre hasta que se cancele en el shutdown.
+        app.state.price_watch_task = asyncio.create_task(box.telegram.run_price_watch_loop())
         logger.info(
             "AW1 %s en %s | proveedor %s | modelo %s | auth %s",
             __version__,
@@ -61,10 +65,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
-            task = getattr(app.state, "browser_task", None)
-            if task is not None:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+            # browser_task es un arranque de una sola vez (~1s, Chromium):
+            # cancelarlo a mitad de camino deja el proceso del driver de
+            # Playwright en un estado invalido que puede colgar cualquier
+            # BrowserPool posterior EN EL MISMO PROCESO (el bug real detras
+            # de un hang intermitente en la bateria de tests, que crea un
+            # app nueva -y por lo tanto un browser_task nuevo- por prueba).
+            # Se espera un rato corto a que termine solo; container.aclose()
+            # llama browser.stop() de todos modos, con o sin exito.
+            browser_task = getattr(app.state, "browser_task", None)
+            if browser_task is not None:
+                _, pending = await asyncio.wait([browser_task], timeout=5.0)
+                if pending:
+                    browser_task.cancel()
+                await asyncio.gather(browser_task, return_exceptions=True)
+            # price_watch_task SI es un loop infinito a proposito: a este
+            # cancelarlo de inmediato es correcto y esperado.
+            price_watch_task = getattr(app.state, "price_watch_task", None)
+            if price_watch_task is not None:
+                price_watch_task.cancel()
+                await asyncio.gather(price_watch_task, return_exceptions=True)
             await app.state.container.aclose()
 
     app = FastAPI(

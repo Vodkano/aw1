@@ -134,8 +134,12 @@ class Settings(BaseSettings):
     # URL publica y estable de esta instancia (ej. https://app.aw1s.online),
     # para construir la webhook URL de cada perfil al llamar Telegram
     # setWebhook. Sin esto no se puede crear un perfil de Telegram -falla
-    # explicito al crear, no en silencio (ver core/telegram_profiles_store.py).
+    # explicito al crear, no en silencio (ver core/telegram_store.py).
     public_base_url: str = ""
+    # Cada cuanto se revisan TODOS los seguimientos de precio activos (todos
+    # los perfiles). Default 6h: mas seguido aumenta el riesgo de que una
+    # tienda bloquee la IP de la VPS (ya paso con Falabella/Ripley).
+    price_watch_interval_seconds: float = Field(default=21600.0, gt=60)
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

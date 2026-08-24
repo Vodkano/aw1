@@ -15,8 +15,8 @@ import type {
   SavedItem,
   Status,
   StoreInfo,
-  TelegramProfileDetail,
-  TelegramProfileSummary,
+  TelegramAgentSummary,
+  TelegramTokenCreated,
 } from "../types";
 
 const TOKEN_KEY = "aw1-token";
@@ -262,32 +262,45 @@ export const admin = {
   deleteApiKey: (id: number) =>
     adminRequest<void>(`/api/admin/api-keys/${id}`, { method: "DELETE" }),
 
-  telegramProfiles: () =>
-    adminRequest<TelegramProfileSummary[]>("/api/admin/telegram-profiles"),
-  telegramProfile: (id: string) =>
-    adminRequest<TelegramProfileDetail>(`/api/admin/telegram-profiles/${id}`),
-  createTelegramProfile: (body: { label: string; bot_token: string; system_prompt: string }) =>
-    adminRequest<TelegramProfileDetail>("/api/admin/telegram-profiles", {
+  telegramAgents: () => adminRequest<TelegramAgentSummary[]>("/api/admin/telegram-agents"),
+  telegramAgent: (id: string) =>
+    adminRequest<TelegramAgentSummary>(`/api/admin/telegram-agents/${id}`),
+  createTelegramAgent: (body: { label: string; system_prompt: string; bot_token: string }) =>
+    adminRequest<TelegramAgentSummary>("/api/admin/telegram-agents", {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  updateTelegramProfile: (
+  updateTelegramAgent: (
     id: string,
-    body: { label: string; bot_token: string; system_prompt: string; enabled: boolean },
+    body: { label: string; system_prompt: string; enabled: boolean },
   ) =>
-    adminRequest<TelegramProfileDetail>(`/api/admin/telegram-profiles/${id}`, {
+    adminRequest<TelegramAgentSummary>(`/api/admin/telegram-agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  deleteTelegramProfile: (id: string) =>
-    adminRequest<void>(`/api/admin/telegram-profiles/${id}`, { method: "DELETE" }),
+  deleteTelegramAgent: (id: string) =>
+    adminRequest<void>(`/api/admin/telegram-agents/${id}`, { method: "DELETE" }),
   testTelegramToken: (value: string) =>
-    adminRequest<{ ok: boolean; detail: string }>("/api/admin/telegram-profiles/test-token", {
+    adminRequest<{ ok: boolean; detail: string }>("/api/admin/telegram-agents/test-token", {
       method: "POST",
       body: JSON.stringify({ value }),
     }),
+  createTelegramToken: (agentId: string, bot_token: string) =>
+    adminRequest<TelegramTokenCreated>(`/api/admin/telegram-agents/${agentId}/tokens`, {
+      method: "POST",
+      body: JSON.stringify({ bot_token }),
+    }),
+  setTelegramTokenEnabled: (agentId: string, tokenId: string, enabled: boolean) =>
+    adminRequest<TelegramTokenCreated>(
+      `/api/admin/telegram-agents/${agentId}/tokens/${tokenId}`,
+      { method: "PUT", body: JSON.stringify({ enabled }) },
+    ),
+  deleteTelegramToken: (agentId: string, tokenId: string) =>
+    adminRequest<void>(`/api/admin/telegram-agents/${agentId}/tokens/${tokenId}`, {
+      method: "DELETE",
+    }),
   generatePrompt: (description: string) =>
-    adminRequest<{ system_prompt: string }>("/api/admin/telegram-profiles/generate-prompt", {
+    adminRequest<{ system_prompt: string }>("/api/admin/telegram-agents/generate-prompt", {
       method: "POST",
       body: JSON.stringify({ description }),
     }),

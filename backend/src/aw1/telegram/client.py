@@ -67,6 +67,17 @@ class TelegramClient:
             return False
         return bool(payload.get("ok"))
 
+    async def send_chat_action(self, token: str, chat_id: int | str, action: str = "typing") -> None:
+        """El "escribiendo..." que ve la persona mientras se genera la
+        respuesta -sin esto, un mensaje que tarda 10-20s en GPT se siente
+        colgado, no ocupado. Nunca lanza: es puramente cosmetico."""
+        try:
+            await self._client.post(
+                self._url(token, "sendChatAction"), json={"chat_id": chat_id, "action": action}
+            )
+        except httpx.HTTPError:
+            pass
+
     async def send_message(self, token: str, chat_id: int | str, text: str) -> None:
         """Trocea si hace falta y respeta el limite de 1 msg/seg por chat.
         Nunca lanza: un fallo al mandar la respuesta se registra, no tumba

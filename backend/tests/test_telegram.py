@@ -1,5 +1,5 @@
-"""Telegram: cliente de la API de bots, y el store de perfiles (cada perfil
-ES un bot independiente, con su propio token)."""
+"""Telegram: cliente de la API de bots, y el store de agentes/tokens (un
+agente puede tener varios tokens/bots; un token es de un solo agente)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from aw1.core.errors import ValidationError
-from aw1.core.telegram_profiles_store import TelegramProfileStore
+from aw1.core.telegram_store import TelegramStore
 from aw1.settings import Settings
 from aw1.telegram.client import TelegramClient, _split_message
 
@@ -78,13 +78,15 @@ async def test_send_message_splits_and_paces_long_replies():
     await client.aclose()
 
 
-# --- TelegramProfileStore -------------------------------------------------------
+# --- TelegramStore: agentes y tokens --------------------------------------------
 class FakeTelegramClient:
     """Doble de TelegramClient: nunca pega a la red real."""
 
     def __init__(self, *, bot_username: str = "aw1s_bot") -> None:
         self.bot_username = bot_username
         self.webhooks_set: list[tuple[str, str, str]] = []
+        self.sent: list[tuple[str, Any, str]] = []
+        self.typing_calls: list[tuple[str, Any]] = []
 
     async def get_me(self, token: str) -> dict[str, Any] | None:
         if token == "bad-token":
@@ -98,6 +100,12 @@ class FakeTelegramClient:
     async def delete_webhook(self, token: str) -> bool:
         return True
 
+    async def send_message(self, token: str, chat_id: Any, text: str) -> None:
+        self.sent.append((token, chat_id, text))
+
+    async def send_chat_action(self, token: str, chat_id: Any, action: str = "typing") -> None:
+        self.typing_calls.append((token, chat_id))
+
 
 @pytest.fixture
 def telegram_settings(tmp_path) -> Settings:
@@ -107,50 +115,222 @@ def telegram_settings(tmp_path) -> Settings:
     )
 
 
-async def test_create_registers_the_webhook_and_hides_the_token_in_list(repo, telegram_settings):
-    store = TelegramProfileStore(repo, FakeTelegramClient(), telegram_settings)
-    row = await store.create(label="Bot personal", bot_token="123:ABC", system_prompt="Eres util.")
+async def _make_token(
+    repo, telegram_settings, *, system_prompt: str = "", bot_token: str = "123:ABC"
+) -> tuple[TelegramStore, dict[str, Any]]:
+    """Crea un agente y un token, y devuelve el token YA UNIDO con los
+    campos del agente -la misma forma que usa el camino caliente del
+    webhook (TelegramStore.get_cached_token)."""
+    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    agent = await store.create_agent(label="Bot", system_prompt=system_prompt)
+    created = await store.create_token(agent["id"], bot_token)
+    token = store.get_cached_token(created["id"])
+    assert token is not None
+    return store, token
 
-    assert row["bot_username"] == "aw1s_bot"
-    assert row["webhook_registered"] is True
 
-    summaries = store.list()
-    assert len(summaries) == 1
-    assert "bot_token" not in summaries[0]
-    assert summaries[0]["token_preview"] == "23:ABC"
+async def test_create_token_registers_the_webhook_and_hides_it_in_the_agent_list(
+    repo, telegram_settings
+):
+    store, token = await _make_token(repo, telegram_settings)
+    assert token["bot_username"] == "aw1s_bot"
+
+    agents = store.list_agents()
+    assert len(agents) == 1
+    assert len(agents[0]["tokens"]) == 1
+    assert "bot_token" not in agents[0]["tokens"][0]
+    assert agents[0]["tokens"][0]["token_preview"] == "23:ABC"
 
 
-async def test_create_rejects_a_token_already_used_by_another_profile(repo, telegram_settings):
-    store = TelegramProfileStore(repo, FakeTelegramClient(), telegram_settings)
-    await store.create(label="Bot uno", bot_token="123:ABC", system_prompt="")
+async def test_an_agent_can_have_more_than_one_token(repo, telegram_settings):
+    """La regla de negocio: un agente puede tener varios tokens (bots); un
+    token es de un solo agente."""
+    store, _first = await _make_token(repo, telegram_settings, bot_token="111:AAA")
+    agent_id = _first["agent_id"]
+    await store.create_token(agent_id, "222:BBB")
+
+    agents = store.list_agents()
+    assert len(agents) == 1
+    assert len(agents[0]["tokens"]) == 2
+
+
+async def test_create_token_rejects_one_already_used_by_another_agent(repo, telegram_settings):
+    store, token = await _make_token(repo, telegram_settings, bot_token="123:ABC")
+    other_agent = await store.create_agent(label="Otro", system_prompt="")
 
     with pytest.raises(ValidationError, match="ya lo usa"):
-        await store.create(label="Bot dos", bot_token="123:ABC", system_prompt="")
+        await store.create_token(other_agent["id"], "123:ABC")
 
 
-async def test_create_rejects_a_token_telegram_does_not_recognize(repo, telegram_settings):
-    store = TelegramProfileStore(repo, FakeTelegramClient(), telegram_settings)
+async def test_create_token_rejects_one_telegram_does_not_recognize(repo, telegram_settings):
+    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    agent = await store.create_agent(label="Bot", system_prompt="")
     with pytest.raises(ValidationError, match="rechazo el token"):
-        await store.create(label="Bot", bot_token="bad-token", system_prompt="")
+        await store.create_token(agent["id"], "bad-token")
 
 
-async def test_get_returns_a_row_the_admin_api_schema_accepts(repo, telegram_settings):
-    """Bug real: get() devolvia la fila cruda de la base, sin token_preview
-    -un campo calculado que TelegramProfileDetail exige (via
-    TelegramProfileSummary) y que rompia GET /telegram-profiles/{id} con un
-    error de validacion apenas se intentaba abrir un perfil ya creado."""
-    from aw1.api.schemas import TelegramProfileDetail
+async def test_get_agent_returns_a_row_the_admin_api_schema_accepts(repo, telegram_settings):
+    from aw1.api.schemas import TelegramAgentSummary
 
-    store = TelegramProfileStore(repo, FakeTelegramClient(), telegram_settings)
-    created = await store.create(label="Bot", bot_token="123:ABC", system_prompt="hola")
-
-    detail = await store.get(created["id"])
+    store, token = await _make_token(repo, telegram_settings)
+    detail = await store.get_agent(token["agent_id"])
     assert detail is not None
-    TelegramProfileDetail(**detail)  # no debe lanzar
+    TelegramAgentSummary(**detail)  # no debe lanzar
 
 
-async def test_create_requires_a_public_base_url(repo, tmp_path):
+async def test_create_agent_does_not_require_a_public_base_url(repo, tmp_path):
+    """El agente (el prompt/personalidad) no necesita webhook; solo agregarle
+    un token si lo necesita -recien ahi hace falta AW1_PUBLIC_BASE_URL."""
     settings = Settings(_env_file=None, env="test", data_dir=tmp_path)
-    store = TelegramProfileStore(repo, FakeTelegramClient(), settings)
+    store = TelegramStore(repo, FakeTelegramClient(), settings)
+    agent = await store.create_agent(label="Bot", system_prompt="")
+    assert agent["id"]
+
     with pytest.raises(ValidationError, match="AW1_PUBLIC_BASE_URL"):
-        await store.create(label="Bot", bot_token="123:ABC", system_prompt="")
+        await store.create_token(agent["id"], "123:ABC")
+
+
+# --- TelegramOrchestrator: deteccion de URLs y seguimiento de precios ----------
+class FakeChatService:
+    """Doble de ChatService: registra con que parametros se la llamo, sin
+    tocar ningun modelo real."""
+
+    def __init__(self, *, answer: str = "ok") -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.answer = answer
+
+    async def stream(self, message, *, conversation_id=None, system_prompt=None, force_gpt=False,
+                      history_hours=None, fast_route=False):
+        self.calls.append(
+            {
+                "message": message, "system_prompt": system_prompt, "force_gpt": force_gpt,
+                "history_hours": history_hours, "fast_route": fast_route,
+            }
+        )
+        from aw1.chat.events import ChatEvent
+
+        yield ChatEvent("done", {"answer": self.answer})
+
+
+class FakePricePipeline:
+    """Doble de PricePipeline.read_price: devuelve una oferta fija por URL,
+    sin abrir ningun navegador."""
+
+    def __init__(self, offers_by_url: dict[str, Any]) -> None:
+        self.offers_by_url = offers_by_url
+
+    async def read_price(self, url: str, product_label: str = "") -> Any:
+        return self.offers_by_url.get(url)
+
+
+def _offer(url: str, store: str, price_clp: float) -> Any:
+    from aw1.pricing.models import Offer
+
+    return Offer(
+        store=store, store_slug=store.lower(), domain=url, url=url, title="Zeta 12",
+        price=price_clp, price_clp=price_clp, price_label=f"${price_clp:,.0f}",
+    )
+
+
+def _make_orchestrator(repo, telegram_settings, *, store, chat=None, prices=None, client=None):
+    from aw1.telegram.orchestrator import TelegramOrchestrator
+
+    return TelegramOrchestrator(
+        tokens=store, client=client or FakeTelegramClient(),
+        chat=chat or FakeChatService(), prices=prices or FakePricePipeline({}),
+        repo=repo, settings=telegram_settings,
+    )
+
+
+async def test_a_message_with_urls_registers_a_watch_instead_of_chatting(repo, telegram_settings):
+    store, token = await _make_token(repo, telegram_settings)
+    client = FakeTelegramClient()
+    prices = FakePricePipeline({
+        "https://a.cl/p": _offer("https://a.cl/p", "Tienda A", 549990),
+        "https://b.cl/p": _offer("https://b.cl/p", "Tienda B", 479990),
+    })
+    chat = FakeChatService()
+    orchestrator = _make_orchestrator(repo, telegram_settings, store=store, chat=chat,
+                                       prices=prices, client=client)
+
+    update = {
+        "message": {
+            "chat": {"id": 999},
+            "text": "siguela aca: https://a.cl/p y https://b.cl/p",
+        }
+    }
+    await orchestrator._handle(token, update)
+
+    assert chat.calls == []
+    watches = await repo.list_price_watches()
+    assert len(watches) == 1
+    assert watches[0]["urls"] == ["https://a.cl/p", "https://b.cl/p"]
+    assert watches[0]["last_price_clp"] == 479990.0
+    assert watches[0]["last_best_url"] == "https://b.cl/p"
+    assert client.sent
+
+
+async def test_a_message_without_urls_goes_through_the_normal_chat_path(repo, telegram_settings):
+    store, token = await _make_token(repo, telegram_settings, system_prompt="Vende zapatillas.")
+    client = FakeTelegramClient()
+    chat = FakeChatService()
+    orchestrator = _make_orchestrator(repo, telegram_settings, store=store, chat=chat, client=client)
+
+    update = {"message": {"chat": {"id": 999}, "text": "hola, como estas?"}}
+    await orchestrator._handle(token, update)
+
+    assert len(chat.calls) == 1
+    call = chat.calls[0]
+    assert call["force_gpt"] is True
+    assert call["history_hours"] == 48.0
+    assert call["fast_route"] is True
+    # El prompt final es base + personalidad + lo propio del agente, no solo
+    # lo que escribio el admin.
+    assert "Vende zapatillas." in call["system_prompt"]
+    assert "atencion al cliente" in call["system_prompt"]
+    assert client.sent == [("123:ABC", 999, "ok")]
+    assert client.typing_calls  # "escribiendo..." mientras se generaba la respuesta
+
+
+async def test_a_close_sentinel_from_the_model_mutes_the_chat(repo, telegram_settings):
+    """Si el modelo detecta mala intencion y agrega el sentinel de cierre,
+    el orquestador lo saca del texto, mutea el chat y NO vuelve a llamar al
+    modelo en el siguiente mensaje de ese mismo chat -asi se ahorran tokens."""
+    from aw1.llm.prompts import TELEGRAM_CLOSE_SENTINEL
+
+    store, token = await _make_token(repo, telegram_settings)
+    client = FakeTelegramClient()
+    chat = FakeChatService(answer=f"No puedo ayudarte con eso.\n{TELEGRAM_CLOSE_SENTINEL}")
+    orchestrator = _make_orchestrator(repo, telegram_settings, store=store, chat=chat, client=client)
+
+    update = {"message": {"chat": {"id": 999}, "text": "mensaje abusivo"}}
+    await orchestrator._handle(token, update)
+
+    assert len(chat.calls) == 1
+    assert TELEGRAM_CLOSE_SENTINEL not in client.sent[-1][2]
+    assert await repo.get_telegram_mute(token["id"], "999") is not None
+
+    # Segundo mensaje del mismo chat: no debe llamar al modelo de nuevo.
+    await orchestrator._handle(token, {"message": {"chat": {"id": 999}, "text": "hola de nuevo"}})
+    assert len(chat.calls) == 1
+    assert len(client.sent) == 2
+
+
+async def test_price_watch_loop_notifies_only_when_the_winner_changes(repo, telegram_settings):
+    store, token = await _make_token(repo, telegram_settings)
+    await repo.create_price_watch("watch1", token["id"], "999", "Zeta 12", ["https://a.cl/p"])
+
+    client = FakeTelegramClient()
+    prices = FakePricePipeline({"https://a.cl/p": _offer("https://a.cl/p", "Tienda A", 549990)})
+    orchestrator = _make_orchestrator(repo, telegram_settings, store=store, prices=prices,
+                                       client=client)
+
+    await orchestrator._check_all_watches()
+    assert len(client.sent) == 1  # primer chequeo: no habia precio previo -> avisa
+
+    await orchestrator._check_all_watches()
+    assert len(client.sent) == 1  # mismo resultado -> no un segundo aviso
+
+    prices.offers_by_url["https://a.cl/p"] = _offer("https://a.cl/p", "Tienda A", 399990)
+    await orchestrator._check_all_watches()
+    assert len(client.sent) == 2  # bajo el precio -> avisa de nuevo

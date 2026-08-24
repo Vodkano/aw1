@@ -1,79 +1,161 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
-import { ChevronDown, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, Sparkles, Trash2, Plus } from "lucide-react";
 import { admin, ApiError, getAdminPassword, setAdminPassword } from "../lib/api";
 import { PasswordGate } from "../components/PasswordGate";
-import type { TelegramProfileDetail, TelegramProfileSummary } from "../types";
+import type { TelegramAgentSummary, TelegramTokenSummary } from "../types";
 
-function TelegramProfileRow({
-  profile,
-  expanded,
-  onToggle,
+const PERSONALITY_LABELS: Record<string, string> = {
+  calida: "Cercana y calida",
+  directa: "Directa y eficiente",
+  entusiasta: "Entusiasta y positiva",
+};
+
+function TokenRow({
+  agentId,
+  token,
   onChanged,
 }: {
-  profile: TelegramProfileSummary;
-  expanded: boolean;
-  onToggle: () => void;
+  agentId: string;
+  token: TelegramTokenSummary;
   onChanged: () => void;
 }) {
-  const [detail, setDetail] = useState<TelegramProfileDetail | null>(null);
-  const [label, setLabel] = useState(profile.label);
-  const [token, setToken] = useState("");
-  const [prompt, setPrompt] = useState(profile.system_prompt);
-  const [showGenerate, setShowGenerate] = useState(false);
-  const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [tokenError, setTokenError] = useState("");
 
-  useEffect(() => {
-    if (expanded && !detail) {
-      admin
-        .telegramProfile(profile.id)
-        .then((row) => {
-          setDetail(row);
-          setLabel(row.label);
-          setPrompt(row.system_prompt);
-        })
-        .catch(() => undefined);
-    }
-  }, [expanded, detail, profile.id]);
-
-  const save = async (changes: Partial<{ label: string; bot_token: string; system_prompt: string; enabled: boolean }>) => {
-    if (!detail) return;
+  const toggle = async () => {
     setBusy(true);
-    setError("");
     try {
-      const updated = await admin.updateTelegramProfile(profile.id, {
-        label: changes.label ?? label,
-        bot_token: changes.bot_token ?? detail.bot_token,
-        system_prompt: changes.system_prompt ?? prompt,
-        enabled: changes.enabled ?? detail.enabled,
-      });
-      setDetail(updated);
-      setLabel(updated.label);
-      setPrompt(updated.system_prompt);
+      await admin.setTelegramTokenEnabled(agentId, token.id, !token.enabled);
       onChanged();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
     } finally {
       setBusy(false);
     }
   };
 
-  const testAndSaveToken = async () => {
-    const value = token.trim();
-    if (!value) return;
+  const remove = async () => {
+    if (!window.confirm(`Quitar el bot @${token.bot_username || token.token_preview}? Tambien se quita su webhook de Telegram.`)) return;
     setBusy(true);
-    setTokenError("");
     try {
-      const result = await admin.testTelegramToken(value);
+      await admin.deleteTelegramToken(agentId, token.id);
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 py-1 text-[12.5px]">
+      <span className={clsx("size-1.5 shrink-0 rounded-full", token.enabled ? "bg-accent-500" : "bg-ink-400")} />
+      <span className="font-mono">
+        {token.bot_username ? `@${token.bot_username}` : `···${token.token_preview}`}
+      </span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={toggle}
+        className="chip ml-auto hover:text-[var(--text)]"
+      >
+        {token.enabled ? "Desactivar" : "Activar"}
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={remove}
+        aria-label="Quitar bot"
+        className="btn btn-ghost size-6 p-0 hover:border-red-400 hover:text-red-500"
+      >
+        <Trash2 className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+function AddTokenForm({ agentId, onAdded }: { agentId: string; onAdded: () => void }) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const add = async () => {
+    const token = value.trim();
+    if (!token) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await admin.testTelegramToken(token);
       if (!result.ok) {
-        setTokenError(result.detail);
+        setError(result.detail);
         return;
       }
-      await save({ bot_token: value });
-      setToken("");
+      await admin.createTelegramToken(agentId, token);
+      setValue("");
+      onAdded();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo agregar el bot.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-1.5">
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder="Token de otro bot de @BotFather..."
+          className="input"
+        />
+        <button
+          type="button"
+          disabled={busy || !value.trim()}
+          onClick={add}
+          className="btn btn-ghost shrink-0 px-3 py-1.5 text-[13px]"
+        >
+          <Plus className="size-3.5" />
+          Agregar bot
+        </button>
+      </div>
+      {error && <p className="mt-1 text-[12px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function AgentRow({
+  agent,
+  expanded,
+  onToggle,
+  onChanged,
+}: {
+  agent: TelegramAgentSummary;
+  expanded: boolean;
+  onToggle: () => void;
+  onChanged: () => void;
+}) {
+  const [label, setLabel] = useState(agent.label);
+  const [prompt, setPrompt] = useState(agent.system_prompt);
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setLabel(agent.label);
+    setPrompt(agent.system_prompt);
+  }, [agent.label, agent.system_prompt]);
+
+  const save = async (changes: Partial<{ label: string; system_prompt: string; enabled: boolean }>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await admin.updateTelegramAgent(agent.id, {
+        label: changes.label ?? label,
+        system_prompt: changes.system_prompt ?? prompt,
+        enabled: changes.enabled ?? agent.enabled,
+      });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
     } finally {
       setBusy(false);
     }
@@ -96,8 +178,8 @@ function TelegramProfileRow({
   };
 
   const remove = async () => {
-    if (!window.confirm(`Borrar el bot "${profile.label}"? Tambien se quita su webhook de Telegram.`)) return;
-    await admin.deleteTelegramProfile(profile.id);
+    if (!window.confirm(`Borrar el agente "${agent.label}" y todos sus bots? Tambien se quitan sus webhooks de Telegram.`)) return;
+    await admin.deleteTelegramAgent(agent.id);
     onChanged();
   };
 
@@ -109,135 +191,117 @@ function TelegramProfileRow({
         className="flex w-full items-center gap-2.5 text-left text-[13px]"
       >
         <ChevronDown className={clsx("size-3.5 shrink-0 transition-transform", expanded && "rotate-180")} />
-        <span className={clsx("size-1.5 shrink-0 rounded-full", profile.enabled ? "bg-accent-500" : "bg-ink-400")} />
-        <span className="font-medium">{profile.label}</span>
-        <span className="muted font-mono text-[12px]">
-          {profile.bot_username ? `@${profile.bot_username}` : `···${profile.token_preview}`}
+        <span className={clsx("size-1.5 shrink-0 rounded-full", agent.enabled ? "bg-accent-500" : "bg-ink-400")} />
+        <span className="font-medium">{agent.label}</span>
+        <span className="muted text-[12px]">
+          {agent.tokens.length} bot{agent.tokens.length === 1 ? "" : "s"} ·{" "}
+          {PERSONALITY_LABELS[agent.personality] ?? agent.personality}
         </span>
       </button>
 
       {expanded && (
         <div className="mt-3 space-y-3 pl-6">
-          {!detail ? (
-            <p className="text-[13px] muted">Cargando...</p>
-          ) : (
-            <>
-              <div className="flex gap-2">
+          <div className="flex gap-2">
+            <input
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="Nombre"
+              className="input"
+            />
+            <button
+              type="button"
+              disabled={busy || !label.trim() || label === agent.label}
+              onClick={() => save({ label: label.trim() })}
+              className="btn btn-ghost shrink-0 px-3 py-1.5 text-[13px]"
+            >
+              Guardar
+            </button>
+          </div>
+
+          <div>
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              rows={4}
+              placeholder="Personalidad del agente (system prompt)..."
+              className="input w-full resize-y"
+            />
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowGenerate((value) => !value)}
+                className="chip hover:text-[var(--text)]"
+              >
+                <Sparkles className="size-3" />
+                Generar con IA
+              </button>
+              <button
+                type="button"
+                disabled={busy || prompt === agent.system_prompt}
+                onClick={() => save({ system_prompt: prompt })}
+                className="btn btn-primary px-3 py-1 text-[12.5px]"
+              >
+                Guardar prompt
+              </button>
+            </div>
+            {showGenerate && (
+              <div className="mt-2 flex gap-2">
                 <input
-                  value={label}
-                  onChange={(event) => setLabel(event.target.value)}
-                  placeholder="Nombre"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Describe el agente en una frase..."
                   className="input"
                 />
                 <button
                   type="button"
-                  disabled={busy || !label.trim() || label === detail.label}
-                  onClick={() => save({ label: label.trim() })}
+                  disabled={busy || !description.trim()}
+                  onClick={generate}
                   className="btn btn-ghost shrink-0 px-3 py-1.5 text-[13px]"
                 >
-                  Guardar
+                  Generar
                 </button>
               </div>
+            )}
+          </div>
 
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={token}
-                  onChange={(event) => setToken(event.target.value)}
-                  placeholder="Reemplazar token de @BotFather..."
-                  className="input"
-                />
-                <button
-                  type="button"
-                  disabled={busy || !token.trim()}
-                  onClick={testAndSaveToken}
-                  className="btn btn-primary shrink-0 px-3 py-1.5 text-[13px]"
-                >
-                  Probar y guardar
-                </button>
-              </div>
-              {tokenError && <p className="text-[12px] text-red-500">{tokenError}</p>}
+          <div>
+            <p className="text-[12px] font-medium uppercase tracking-wide muted">Bots de Telegram</p>
+            {agent.tokens.length === 0 && (
+              <p className="mt-1 text-[12.5px] muted">Este agente todavia no tiene ningun bot.</p>
+            )}
+            {agent.tokens.map((token) => (
+              <TokenRow key={token.id} agentId={agent.id} token={token} onChanged={onChanged} />
+            ))}
+            <AddTokenForm agentId={agent.id} onAdded={onChanged} />
+          </div>
 
-              <div>
-                <textarea
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  rows={4}
-                  placeholder="Personalidad del bot (system prompt)..."
-                  className="input w-full resize-y"
-                />
-                <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowGenerate((value) => !value)}
-                    className="chip hover:text-[var(--text)]"
-                  >
-                    <Sparkles className="size-3" />
-                    Generar con IA
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || prompt === detail.system_prompt}
-                    onClick={() => save({ system_prompt: prompt })}
-                    className="btn btn-primary px-3 py-1 text-[12.5px]"
-                  >
-                    Guardar prompt
-                  </button>
-                </div>
-                {showGenerate && (
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      placeholder="Describe el bot en una frase..."
-                      className="input"
-                    />
-                    <button
-                      type="button"
-                      disabled={busy || !description.trim()}
-                      onClick={generate}
-                      className="btn btn-ghost shrink-0 px-3 py-1.5 text-[13px]"
-                    >
-                      Generar
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => save({ enabled: !detail.enabled })}
-                  className="chip hover:text-[var(--text)]"
-                >
-                  {detail.enabled ? "Activo · click para desactivar" : "Inactivo · click para activar"}
-                </button>
-                <button
-                  type="button"
-                  onClick={remove}
-                  aria-label="Borrar"
-                  className="btn btn-ghost size-7 p-0 hover:border-red-400 hover:text-red-500"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </div>
-              {!detail.webhook_registered && (
-                <p className="text-[12px] text-amber-600 dark:text-amber-400">
-                  El webhook no quedo registrado en Telegram -reemplaza el token para reintentar.
-                </p>
-              )}
-              {error && <p className="text-[12px] text-red-500">{error}</p>}
-            </>
-          )}
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => save({ enabled: !agent.enabled })}
+              className="chip hover:text-[var(--text)]"
+            >
+              {agent.enabled ? "Activo · click para desactivar" : "Inactivo · click para activar"}
+            </button>
+            <button
+              type="button"
+              onClick={remove}
+              aria-label="Borrar agente"
+              className="btn btn-ghost size-7 p-0 hover:border-red-400 hover:text-red-500"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
+          {error && <p className="text-[12px] text-red-500">{error}</p>}
         </div>
       )}
     </div>
   );
 }
 
-function TelegramProfilesCard() {
-  const [profiles, setProfiles] = useState<TelegramProfileSummary[] | null>(null);
+function TelegramAgentsCard() {
+  const [agents, setAgents] = useState<TelegramAgentSummary[] | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState("");
   const [newToken, setNewToken] = useState("");
@@ -248,7 +312,7 @@ function TelegramProfilesCard() {
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
 
-  const load = () => admin.telegramProfiles().then(setProfiles).catch(() => setProfiles([]));
+  const load = () => admin.telegramAgents().then(setAgents).catch(() => setAgents([]));
   useEffect(() => {
     load();
   }, []);
@@ -269,12 +333,12 @@ function TelegramProfilesCard() {
   };
 
   const create = async () => {
-    if (!newLabel.trim() || !newToken.trim()) return;
+    if (!newLabel.trim()) return;
     setCreateBusy(true);
     setCreateError("");
     try {
-      const row = await admin.createTelegramProfile({
-        label: newLabel.trim(), bot_token: newToken.trim(), system_prompt: newPrompt.trim(),
+      const row = await admin.createTelegramAgent({
+        label: newLabel.trim(), system_prompt: newPrompt.trim(), bot_token: newToken.trim(),
       });
       setNewLabel("");
       setNewToken("");
@@ -283,7 +347,7 @@ function TelegramProfilesCard() {
       setExpandedId(row.id);
       load();
     } catch (err) {
-      setCreateError(err instanceof ApiError ? err.message : "No se pudo crear el bot.");
+      setCreateError(err instanceof ApiError ? err.message : "No se pudo crear el agente.");
     } finally {
       setCreateBusy(false);
     }
@@ -293,23 +357,24 @@ function TelegramProfilesCard() {
     <section className="card mt-7 p-5">
       <h2 className="text-[15px] font-semibold">Nuevo agente</h2>
       <p className="mt-1 text-[13px] muted">
-        Cada agente es un bot de Telegram independiente (su propio token de @BotFather), con su
-        propia personalidad. Necesita <code className="font-mono">AW1_PUBLIC_BASE_URL</code>{" "}
-        configurado para registrar el webhook.
+        Un agente es su prompt y personalidad (elegida al azar entre 3 al crearlo). Puede atender
+        uno o varios bots de Telegram a la vez -pegale un primer token aca, o agregaselo despues.
+        Necesita <code className="font-mono">AW1_PUBLIC_BASE_URL</code> configurado para
+        registrar el webhook de cada bot.
       </p>
 
       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
         <input
           value={newLabel}
           onChange={(event) => setNewLabel(event.target.value)}
-          placeholder="Nombre (ej: Bot personal)"
+          placeholder="Nombre (ej: Atencion al cliente)"
           className="input"
         />
         <input
           type="password"
           value={newToken}
           onChange={(event) => setNewToken(event.target.value)}
-          placeholder="Token de @BotFather"
+          placeholder="Token de @BotFather (opcional)"
           className="input"
         />
       </div>
@@ -319,14 +384,14 @@ function TelegramProfilesCard() {
           value={newPrompt}
           onChange={(event) => setNewPrompt(event.target.value)}
           rows={4}
-          placeholder="Personalidad del bot (system prompt). Puedes dejarlo vacio y usar el estilo normal del chat."
+          placeholder="Instrucciones propias del agente. Puedes dejarlo vacio y usar el estilo por defecto."
           className="input w-full resize-y"
         />
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <input
             value={newDescription}
             onChange={(event) => setNewDescription(event.target.value)}
-            placeholder="Describe el bot en una frase..."
+            placeholder="Describe el agente en una frase..."
             className="input max-w-xs"
           />
           <button
@@ -344,7 +409,7 @@ function TelegramProfilesCard() {
 
       <button
         type="button"
-        disabled={createBusy || !newLabel.trim() || !newToken.trim()}
+        disabled={createBusy || !newLabel.trim()}
         onClick={create}
         className="btn btn-primary mt-3 px-4 py-1.5 text-[13px]"
       >
@@ -353,14 +418,14 @@ function TelegramProfilesCard() {
       {createError && <p className="mt-2 text-[12.5px] text-red-500">{createError}</p>}
 
       <div className="mt-4">
-        {profiles === null && <p className="text-[13px] muted">Cargando...</p>}
-        {profiles?.length === 0 && <p className="text-[13px] muted">Ningun agente creado todavia.</p>}
-        {profiles?.map((profile) => (
-          <TelegramProfileRow
-            key={profile.id}
-            profile={profile}
-            expanded={expandedId === profile.id}
-            onToggle={() => setExpandedId(expandedId === profile.id ? null : profile.id)}
+        {agents === null && <p className="text-[13px] muted">Cargando...</p>}
+        {agents?.length === 0 && <p className="text-[13px] muted">Ningun agente creado todavia.</p>}
+        {agents?.map((agent) => (
+          <AgentRow
+            key={agent.id}
+            agent={agent}
+            expanded={expandedId === agent.id}
+            onToggle={() => setExpandedId(expandedId === agent.id ? null : agent.id)}
             onChanged={load}
           />
         ))}
@@ -395,11 +460,11 @@ export function AgentsView() {
       <div className="mx-auto max-w-3xl py-6 pb-16">
         <h1 className="text-[26px] font-semibold tracking-tight md:text-[30px]">Agentes</h1>
         <p className="mt-1.5 text-[14px] muted">
-          Bots de Telegram, cada uno con su propio token y personalidad. Corren todos al mismo
-          tiempo, sin limite -sumar uno es solo crear el perfil.
+          Agentes de Telegram: cada uno tiene su prompt y personalidad, y puede atender uno o
+          varios bots a la vez. Corren todos al mismo tiempo, sin limite.
         </p>
 
-        <TelegramProfilesCard />
+        <TelegramAgentsCard />
       </div>
     </div>
   );

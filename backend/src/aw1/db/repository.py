@@ -40,13 +40,30 @@ def _item_from_row(row: aiosqlite.Row) -> dict[str, Any]:
     }
 
 
-def _telegram_profile_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+def _telegram_agent_from_row(row: aiosqlite.Row) -> dict[str, Any]:
     return {
-        "id": row["id"], "label": row["label"], "bot_token": row["bot_token"],
+        "id": row["id"], "label": row["label"], "system_prompt": row["system_prompt"],
+        "personality": row["personality"], "enabled": bool(row["enabled"]),
+        "created_at": _parse(row["created_at"]), "updated_at": _parse(row["updated_at"]),
+    }
+
+
+def _telegram_token_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "agent_id": row["agent_id"], "bot_token": row["bot_token"],
         "bot_token_hash": row["bot_token_hash"], "bot_username": row["bot_username"],
-        "webhook_secret": row["webhook_secret"], "system_prompt": row["system_prompt"],
+        "webhook_secret": row["webhook_secret"], "enabled": bool(row["enabled"]),
+        "created_at": _parse(row["created_at"]), "updated_at": _parse(row["updated_at"]),
+    }
+
+
+def _price_watch_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "token_id": row["token_id"], "chat_id": row["chat_id"],
+        "product_label": row["product_label"], "urls": json.loads(row["urls"]),
+        "last_price_clp": row["last_price_clp"], "last_best_url": row["last_best_url"],
+        "last_checked_at": _parse(row["last_checked_at"]) if row["last_checked_at"] else None,
         "enabled": bool(row["enabled"]), "created_at": _parse(row["created_at"]),
-        "updated_at": _parse(row["updated_at"]),
     }
 
 
@@ -122,6 +139,24 @@ class Repository:
             "SELECT role, content FROM messages WHERE conversation_id = ? "
             "ORDER BY id DESC LIMIT ?",
             (conversation_id, turns * 2),
+        )
+        rows = list(await cursor.fetchall())
+        await cursor.close()
+        return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
+
+    async def history_since(
+        self, conversation_id: str, since_iso: str, max_messages: int = 60
+    ) -> list[dict[str, str]]:
+        """Igual que history(), pero por ventana de tiempo en vez de turnos
+        -lo usan los agentes de Telegram (memoria de 48h). max_messages es un
+        tope duro ademas del tiempo, para no mandarle al modelo un historial
+        gigante si alguien chateo sin parar durante toda la ventana."""
+        if max_messages <= 0:
+            return []
+        cursor = await self._conn.execute(
+            "SELECT role, content FROM messages WHERE conversation_id = ? AND created_at >= ? "
+            "ORDER BY id DESC LIMIT ?",
+            (conversation_id, since_iso, max_messages),
         )
         rows = list(await cursor.fetchall())
         await cursor.close()
@@ -402,89 +437,227 @@ class Repository:
             await self._conn.commit()
             return bool(cursor.rowcount)
 
-    # -- panel admin: perfiles de telegram -----------------------------------
-    async def create_telegram_profile(
-        self, profile_id: str, label: str, bot_token: str, bot_token_hash: str,
-        bot_username: str, webhook_secret: str, system_prompt: str,
+    # -- panel admin: agentes de telegram (el "cerebro": prompt, personalidad) --
+    async def create_telegram_agent(
+        self, agent_id: str, label: str, system_prompt: str, personality: str,
     ) -> dict[str, Any]:
         now = utcnow()
         async with self._lock:
             await self._conn.execute(
-                "INSERT INTO telegram_profiles (id, label, bot_token, bot_token_hash, "
-                "bot_username, webhook_secret, system_prompt, enabled, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-                (
-                    profile_id, label, bot_token, bot_token_hash, bot_username,
-                    webhook_secret, system_prompt, _iso(now), _iso(now),
-                ),
+                "INSERT INTO telegram_agents (id, label, system_prompt, personality, "
+                "enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+                (agent_id, label, system_prompt, personality, _iso(now), _iso(now)),
             )
             await self._conn.commit()
         return {
-            "id": profile_id, "label": label, "bot_token": bot_token,
-            "bot_token_hash": bot_token_hash, "bot_username": bot_username,
-            "webhook_secret": webhook_secret, "system_prompt": system_prompt,
-            "enabled": True, "created_at": now, "updated_at": now,
+            "id": agent_id, "label": label, "system_prompt": system_prompt,
+            "personality": personality, "enabled": True, "created_at": now, "updated_at": now,
         }
 
-    async def list_telegram_profiles(self) -> list[dict[str, Any]]:
+    async def list_telegram_agents(self) -> list[dict[str, Any]]:
         cursor = await self._conn.execute(
-            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
-            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles "
-            "ORDER BY created_at DESC"
+            "SELECT id, label, system_prompt, personality, enabled, created_at, updated_at "
+            "FROM telegram_agents ORDER BY created_at DESC"
         )
         rows = await cursor.fetchall()
         await cursor.close()
-        return [_telegram_profile_from_row(row) for row in rows]
+        return [_telegram_agent_from_row(row) for row in rows]
 
-    async def get_telegram_profile(self, profile_id: str) -> dict[str, Any] | None:
+    async def get_telegram_agent(self, agent_id: str) -> dict[str, Any] | None:
         cursor = await self._conn.execute(
-            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
-            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles WHERE id = ?",
-            (profile_id,),
+            "SELECT id, label, system_prompt, personality, enabled, created_at, updated_at "
+            "FROM telegram_agents WHERE id = ?",
+            (agent_id,),
         )
         row = await cursor.fetchone()
         await cursor.close()
-        return _telegram_profile_from_row(row) if row else None
+        return _telegram_agent_from_row(row) if row else None
 
-    async def get_telegram_profile_by_token_hash(
-        self, bot_token_hash: str
-    ) -> dict[str, Any] | None:
-        cursor = await self._conn.execute(
-            "SELECT id, label, bot_token, bot_token_hash, bot_username, webhook_secret, "
-            "system_prompt, enabled, created_at, updated_at FROM telegram_profiles "
-            "WHERE bot_token_hash = ?",
-            (bot_token_hash,),
-        )
-        row = await cursor.fetchone()
-        await cursor.close()
-        return _telegram_profile_from_row(row) if row else None
-
-    async def update_telegram_profile(
-        self, profile_id: str, *, label: str, bot_token: str, bot_token_hash: str,
-        bot_username: str, system_prompt: str, enabled: bool,
+    async def update_telegram_agent(
+        self, agent_id: str, *, label: str, system_prompt: str, enabled: bool,
     ) -> dict[str, Any] | None:
         now = utcnow()
         async with self._lock:
             cursor = await self._conn.execute(
-                "UPDATE telegram_profiles SET label = ?, bot_token = ?, bot_token_hash = ?, "
-                "bot_username = ?, system_prompt = ?, enabled = ?, updated_at = ? WHERE id = ?",
-                (
-                    label, bot_token, bot_token_hash, bot_username, system_prompt,
-                    int(enabled), _iso(now), profile_id,
-                ),
+                "UPDATE telegram_agents SET label = ?, system_prompt = ?, enabled = ?, "
+                "updated_at = ? WHERE id = ?",
+                (label, system_prompt, int(enabled), _iso(now), agent_id),
             )
             await self._conn.commit()
             if not cursor.rowcount:
                 return None
-        return await self.get_telegram_profile(profile_id)
+        return await self.get_telegram_agent(agent_id)
 
-    async def delete_telegram_profile(self, profile_id: str) -> bool:
+    async def delete_telegram_agent(self, agent_id: str) -> bool:
         async with self._lock:
             cursor = await self._conn.execute(
-                "DELETE FROM telegram_profiles WHERE id = ?", (profile_id,)
+                "DELETE FROM telegram_agents WHERE id = ?", (agent_id,)
             )
             await self._conn.commit()
             return bool(cursor.rowcount)
+
+    # -- panel admin: tokens de telegram (un bot de BotFather, de un agente) ----
+    async def create_telegram_token(
+        self, token_id: str, agent_id: str, bot_token: str, bot_token_hash: str,
+        bot_username: str, webhook_secret: str,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO telegram_tokens (id, agent_id, bot_token, bot_token_hash, "
+                "bot_username, webhook_secret, enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    token_id, agent_id, bot_token, bot_token_hash, bot_username,
+                    webhook_secret, _iso(now), _iso(now),
+                ),
+            )
+            await self._conn.commit()
+        return {
+            "id": token_id, "agent_id": agent_id, "bot_token": bot_token,
+            "bot_token_hash": bot_token_hash, "bot_username": bot_username,
+            "webhook_secret": webhook_secret, "enabled": True,
+            "created_at": now, "updated_at": now,
+        }
+
+    async def list_telegram_tokens(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        query = (
+            "SELECT id, agent_id, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "enabled, created_at, updated_at FROM telegram_tokens"
+        )
+        params: tuple[Any, ...] = ()
+        if agent_id is not None:
+            query += " WHERE agent_id = ?"
+            params = (agent_id,)
+        query += " ORDER BY created_at DESC"
+        cursor = await self._conn.execute(query, params)
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [_telegram_token_from_row(row) for row in rows]
+
+    async def get_telegram_token(self, token_id: str) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(
+            "SELECT id, agent_id, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "enabled, created_at, updated_at FROM telegram_tokens WHERE id = ?",
+            (token_id,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _telegram_token_from_row(row) if row else None
+
+    async def get_telegram_token_by_hash(self, bot_token_hash: str) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(
+            "SELECT id, agent_id, bot_token, bot_token_hash, bot_username, webhook_secret, "
+            "enabled, created_at, updated_at FROM telegram_tokens WHERE bot_token_hash = ?",
+            (bot_token_hash,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _telegram_token_from_row(row) if row else None
+
+    async def set_telegram_token_enabled(
+        self, token_id: str, enabled: bool
+    ) -> dict[str, Any] | None:
+        now = utcnow()
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "UPDATE telegram_tokens SET enabled = ?, updated_at = ? WHERE id = ?",
+                (int(enabled), _iso(now), token_id),
+            )
+            await self._conn.commit()
+            if not cursor.rowcount:
+                return None
+        return await self.get_telegram_token(token_id)
+
+    async def delete_telegram_token(self, token_id: str) -> bool:
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "DELETE FROM telegram_tokens WHERE id = ?", (token_id,)
+            )
+            await self._conn.commit()
+            return bool(cursor.rowcount)
+
+    # -- seguimiento de precios (bots de Telegram) ---------------------------
+    async def create_price_watch(
+        self, watch_id: str, token_id: str, chat_id: str, product_label: str,
+        urls: list[str],
+    ) -> dict[str, Any]:
+        now = utcnow()
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO price_watches (id, token_id, chat_id, product_label, urls, "
+                "enabled, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)",
+                (
+                    watch_id, token_id, chat_id, product_label,
+                    json.dumps(urls, ensure_ascii=False), _iso(now),
+                ),
+            )
+            await self._conn.commit()
+        return {
+            "id": watch_id, "token_id": token_id, "chat_id": chat_id,
+            "product_label": product_label, "urls": urls, "last_price_clp": None,
+            "last_best_url": None, "last_checked_at": None, "enabled": True,
+            "created_at": now,
+        }
+
+    async def list_price_watches(self, *, enabled_only: bool = True) -> list[dict[str, Any]]:
+        query = (
+            "SELECT id, token_id, chat_id, product_label, urls, last_price_clp, "
+            "last_best_url, last_checked_at, enabled, created_at FROM price_watches"
+        )
+        if enabled_only:
+            query += " WHERE enabled = 1"
+        cursor = await self._conn.execute(query)
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [_price_watch_from_row(row) for row in rows]
+
+    async def update_price_watch_result(
+        self, watch_id: str, price_clp: float, best_url: str
+    ) -> None:
+        async with self._lock:
+            await self._conn.execute(
+                "UPDATE price_watches SET last_price_clp = ?, last_best_url = ?, "
+                "last_checked_at = ? WHERE id = ?",
+                (price_clp, best_url, _iso(utcnow()), watch_id),
+            )
+            await self._conn.commit()
+
+    async def delete_price_watch(self, watch_id: str) -> bool:
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "DELETE FROM price_watches WHERE id = ?", (watch_id,)
+            )
+            await self._conn.commit()
+            return bool(cursor.rowcount)
+
+    # -- corte de conversacion (bots de Telegram) ----------------------------
+    async def mute_telegram_chat(
+        self, token_id: str, chat_id: str, reason: str, until_iso: str
+    ) -> None:
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO telegram_mutes (token_id, chat_id, reason, muted_until, "
+                "created_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(token_id, chat_id) DO UPDATE SET reason = excluded.reason, "
+                "muted_until = excluded.muted_until",
+                (token_id, chat_id, reason, until_iso, _iso(utcnow())),
+            )
+            await self._conn.commit()
+
+    async def get_telegram_mute(self, token_id: str, chat_id: str) -> dict[str, Any] | None:
+        """None si nunca se muteo o si el mute ya vencio -el llamador no
+        necesita distinguir esos dos casos."""
+        cursor = await self._conn.execute(
+            "SELECT reason, muted_until FROM telegram_mutes "
+            "WHERE token_id = ? AND chat_id = ? AND muted_until > ?",
+            (token_id, chat_id, _iso(utcnow())),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        if row is None:
+            return None
+        return {"reason": row["reason"], "muted_until": _parse(row["muted_until"])}
 
     # -- borrado total ------------------------------------------------------
     async def purge(self, tables: Sequence[str] | None = None) -> dict[str, int]:

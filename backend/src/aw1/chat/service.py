@@ -27,6 +27,7 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -126,6 +127,9 @@ class ChatService:
         *,
         conversation_id: str | None = None,
         system_prompt: str | None = None,
+        force_gpt: bool = False,
+        history_hours: float | None = None,
+        fast_route: bool = False,
     ) -> AsyncIterator[ChatEvent]:
         clean = " ".join(str(message or "").split())
         if not clean:
@@ -141,9 +145,22 @@ class ChatService:
         conversation = conversation_id or uuid.uuid4().hex
         yield ChatEvent("start", {"conversation_id": conversation})
 
-        history = await self._repo.history(conversation, self._settings.max_history_turns)
+        if history_hours is not None:
+            since = datetime.now(UTC) - timedelta(hours=history_hours)
+            history = await self._repo.history_since(conversation, since.isoformat())
+        else:
+            history = await self._repo.history(conversation, self._settings.max_history_turns)
 
-        route = heuristics.merge(heuristics.route(clean), await self._safe_route(clean))
+        # fast_route (Telegram, con force_gpt): se salta la clasificacion por
+        # IA, que viaja a Ollama y puede tardar hasta 25s por el tunel -con
+        # force_gpt esa clasificacion ya no decide el modelo de respuesta
+        # (siempre GPT), y precio/biografia/codigo los detecta igual de bien
+        # la heuristica local (merge() ya le da prioridad a "precio" sobre
+        # cualquier cosa que diga el modelo).
+        if fast_route:
+            route = heuristics.route(clean)
+        else:
+            route = heuristics.merge(heuristics.route(clean), await self._safe_route(clean))
         await self._repo.save_reasoning(conversation, "chat_route", clean, route.model_dump())
         yield ChatEvent("route", {"intent": route.intent})
 
@@ -176,7 +193,9 @@ class ChatService:
         # "@gpt"/"@ollama" SI puede aplicar incluso en biografia (la persona
         # lo pidio a proposito), pero la cita de Wikipedia se mantiene
         # -ver mas abajo, `sources` se le pasa igual a _answer_with_gpt.
-        wants_gpt = (route.heavy or route.needs_fresh_data) and route.intent != "biografia"
+        wants_gpt = force_gpt or (
+            (route.heavy or route.needs_fresh_data) and route.intent != "biografia"
+        )
         if mention in PROVIDER_OVERRIDES:
             wants_gpt = PROVIDER_OVERRIDES[mention]
 

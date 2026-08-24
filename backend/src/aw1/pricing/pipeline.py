@@ -78,6 +78,19 @@ class PricePipeline:
             raise NoResultsError("La busqueda no produjo resultados.")
         return result
 
+    async def read_price(self, url: str, product_label: str = "") -> Offer | None:
+        """Lee el precio de UNA pagina que la persona ya eligio -sin buscar
+        candidatos ni armar un plan de busqueda, la URL ya es la eleccion
+        (la usa el seguimiento de precios de los bots de Telegram). Reusa
+        _offer_from tal cual: misma lectura de ficha, mismo juez de precio,
+        misma verificacion anti-alucinacion que el comparador normal."""
+        host = (urlparse(url).hostname or url).lower()
+        store = store_for_host(host) or Store(
+            slug=host, name=host, domain=host, search_template="", url_patterns=()
+        )
+        plan = SearchPlan(product=product_label or host)
+        return await self._offer_from(store, plan, {"url": url, "title": ""})
+
     async def run(
         self, query: str, stores: list[str] | None = None, *, refresh: bool = False
     ) -> AsyncIterator[Event]:

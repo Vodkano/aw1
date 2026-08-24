@@ -82,6 +82,57 @@ async def test_without_a_custom_system_prompt_the_default_is_used(repo, test_set
     assert fake.last_messages[0] == {"role": "system", "content": CHAT_SYSTEM}
 
 
+# --- force_gpt / history_hours (agentes de Telegram) ---------------------------
+async def test_force_gpt_still_falls_back_to_ollama_when_gpt_is_not_configured(repo, test_settings):
+    """Los agentes de Telegram fuerzan GPT, pero la red de seguridad se
+    mantiene: sin clave configurada, cae al modelo local igual que hoy."""
+    service, fake = await _build_service(repo, test_settings, None)
+
+    events = await _collect(service.stream("hola", force_gpt=True))
+    notice = next(event for event in events if event.type == "notice")
+    assert "GPT" in notice.data["text"]
+    done = next(event for event in events if event.type == "done")
+    assert done.data["source"] == "local"
+
+
+async def test_history_hours_excludes_messages_outside_the_time_window(repo, test_settings):
+    """Memoria de 48h: un mensaje mas viejo que la ventana no debe llegar al
+    modelo, aunque history() (por turnos) si lo hubiera incluido."""
+    from datetime import UTC, datetime, timedelta
+
+    conversation_id = "conv-telegram"
+    old = datetime.now(UTC) - timedelta(hours=72)
+    await repo.ensure_conversation(conversation_id)
+    await repo._conn.execute(
+        "INSERT INTO messages (conversation_id, role, content, source, created_at) "
+        "VALUES (?, 'user', 'mensaje viejo', 'local', ?)",
+        (conversation_id, old.isoformat()),
+    )
+    await repo._conn.commit()
+    await repo.add_message(conversation_id, "user", "mensaje reciente")
+
+    service, fake = await _build_service(repo, test_settings, None)
+    await _collect(service.stream("hola", conversation_id=conversation_id, history_hours=48.0))
+
+    contents = [item["content"] for item in fake.last_messages]
+    assert "mensaje reciente" in contents
+    assert "mensaje viejo" not in contents
+
+
+async def test_fast_route_skips_the_network_classification(repo, test_settings):
+    """Los agentes de Telegram fuerzan fast_route: se salta route_chat (una
+    llamada de red al modelo, hasta 25s si esta detras de un tunel lento) y
+    usa solo la heuristica local -era el principal cuello de botella de
+    latencia del bot de Telegram."""
+    service, fake = await _build_service(repo, test_settings, None)
+
+    await _collect(service.stream("hola, como estas?", fast_route=True))
+    assert fake.json_calls == []
+
+    await _collect(service.stream("hola, como estas?"))
+    assert fake.json_calls != []
+
+
 # --- dispatch de herramientas ------------------------------------------------
 async def test_a_tool_dispatches_by_matching_intent(repo, test_settings):
     tool = DummyTool()

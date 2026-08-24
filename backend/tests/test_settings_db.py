@@ -68,6 +68,113 @@ async def test_history_is_ordered_and_limited(repo):
     assert [turn["content"] for turn in history] == ["p3", "r3", "p4", "r4"]
 
 
+async def test_history_since_only_returns_messages_inside_the_time_window(repo):
+    """Memoria de 48h de los agentes de Telegram: history_since filtra por
+    tiempo, no por cantidad de turnos como history()."""
+    from datetime import UTC, datetime, timedelta
+
+    await repo.add_message("conv", "user", "viejo")
+    old = datetime.now(UTC) - timedelta(hours=72)
+    await repo._conn.execute(
+        "UPDATE messages SET created_at = ? WHERE content = 'viejo'", (old.isoformat(),)
+    )
+    await repo._conn.commit()
+    await repo.add_message("conv", "user", "reciente")
+
+    since = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
+    history = await repo.history_since("conv", since)
+    assert [turn["content"] for turn in history] == ["reciente"]
+
+
+async def test_history_since_caps_at_max_messages(repo):
+    for index in range(5):
+        await repo.add_message("conv", "user", f"p{index}")
+    since = "2000-01-01T00:00:00+00:00"
+    history = await repo.history_since("conv", since, max_messages=2)
+    assert len(history) == 2
+    assert history[-1]["content"] == "p4"
+
+
+async def _make_token(repo, *, agent_id: str = "agent1", token_id: str = "tok1"):
+    await repo.create_telegram_agent(agent_id, "Bot", "", "calida")
+    return await repo.create_telegram_token(
+        token_id, agent_id, "123:ABC", "hash1", "aw1s_bot", "secret"
+    )
+
+
+async def test_telegram_agent_and_token_round_trip(repo):
+    agent = await repo.create_telegram_agent("agent1", "Bot", "Se breve.", "directa")
+    assert agent["personality"] == "directa"
+
+    token = await repo.create_telegram_token(
+        "tok1", "agent1", "123:ABC", "hash1", "aw1s_bot", "secret"
+    )
+    assert token["agent_id"] == "agent1"
+    assert await repo.get_telegram_token_by_hash("hash1") == token
+
+    tokens = await repo.list_telegram_tokens("agent1")
+    assert [item["id"] for item in tokens] == ["tok1"]
+
+    updated = await repo.update_telegram_agent(
+        "agent1", label="Bot renombrado", system_prompt="Nuevo prompt.", enabled=False
+    )
+    assert updated["label"] == "Bot renombrado"
+    assert updated["enabled"] is False
+
+    disabled = await repo.set_telegram_token_enabled("tok1", False)
+    assert disabled["enabled"] is False
+
+    assert await repo.delete_telegram_token("tok1") is True
+    assert await repo.list_telegram_tokens("agent1") == []
+    assert await repo.delete_telegram_agent("agent1") is True
+
+
+async def test_telegram_mute_round_trips(repo):
+    from datetime import UTC, datetime, timedelta
+
+    await _make_token(repo)
+    assert await repo.get_telegram_mute("tok1", "999") is None
+
+    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    await repo.mute_telegram_chat("tok1", "999", "abuso", future)
+    mute = await repo.get_telegram_mute("tok1", "999")
+    assert mute["reason"] == "abuso"
+
+    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    await repo.mute_telegram_chat("tok1", "999", "vencido", past)
+    assert await repo.get_telegram_mute("tok1", "999") is None
+
+
+async def test_price_watch_round_trips(repo):
+    await _make_token(repo)
+    watch = await repo.create_price_watch(
+        "watch1", "tok1", "999", "Zeta 12", ["https://a.cl/p", "https://b.cl/p"]
+    )
+    assert watch["last_price_clp"] is None
+
+    watches = await repo.list_price_watches()
+    assert len(watches) == 1
+    assert watches[0]["urls"] == ["https://a.cl/p", "https://b.cl/p"]
+
+    await repo.update_price_watch_result("watch1", 549990.0, "https://a.cl/p")
+    watches = await repo.list_price_watches()
+    assert watches[0]["last_price_clp"] == 549990.0
+    assert watches[0]["last_best_url"] == "https://a.cl/p"
+
+    assert await repo.delete_price_watch("watch1") is True
+    assert await repo.list_price_watches() == []
+
+
+async def test_list_price_watches_excludes_disabled_ones_by_default(repo):
+    await _make_token(repo)
+    await repo.create_price_watch("watch1", "tok1", "999", "Zeta 12", ["https://a.cl/p"])
+    await repo._conn.execute("UPDATE price_watches SET enabled = 0 WHERE id = 'watch1'")
+    await repo._conn.commit()
+
+    assert await repo.list_price_watches(enabled_only=True) == []
+    assert len(await repo.list_price_watches(enabled_only=False)) == 1
+
+
 async def test_reasoning_round_trips_and_stays_internal(repo):
     reasoning_id = await repo.save_reasoning("conv", "chat_route", "hola", {"intent": "charla"})
     stored = await repo.get_reasoning(reasoning_id)

@@ -16,7 +16,7 @@ from ..core import llm_provider
 from ..core.api_keys_store import ApiKeyStore
 from ..core.ratelimit import RateLimiter
 from ..core.secrets_store import SecretsStore
-from ..core.telegram_profiles_store import TelegramProfileStore
+from ..core.telegram_store import TelegramStore
 from ..db import create_repository
 from ..db.postgres_repository import PostgresRepository
 from ..db.repository import Repository
@@ -59,7 +59,7 @@ class Container:
     secrets: SecretsStore
     api_keys: ApiKeyStore
     telegram_client: TelegramClient
-    telegram_profiles: TelegramProfileStore
+    telegram_store: TelegramStore
     telegram: TelegramOrchestrator
 
     @classmethod
@@ -70,8 +70,8 @@ class Container:
         secrets = SecretsStore(repo)
         api_keys = ApiKeyStore(repo)
         telegram_client = TelegramClient()
-        telegram_profiles = TelegramProfileStore(repo, telegram_client, settings)
-        await asyncio.gather(secrets.load(), api_keys.load(), telegram_profiles.load())
+        telegram_store = TelegramStore(repo, telegram_client, settings)
+        await asyncio.gather(secrets.load(), api_keys.load(), telegram_store.load())
 
         llm = _build_llm_client(settings, secrets)
         judges = Judges(
@@ -90,14 +90,15 @@ class Container:
             wikipedia=wikipedia, secrets=secrets, tools=tools,
         )
         telegram = TelegramOrchestrator(
-            profiles=telegram_profiles, client=telegram_client, chat=chat
+            tokens=telegram_store, client=telegram_client, chat=chat,
+            prices=prices, repo=repo, settings=settings,
         )
         return cls(
             settings=settings, repo=repo, llm=llm, judges=judges, browser=browser,
             wikipedia=wikipedia, chat=chat, prices=prices, tools=tools,
             limiter=RateLimiter(settings.rate_limit_per_minute),
             secrets=secrets, api_keys=api_keys, telegram_client=telegram_client,
-            telegram_profiles=telegram_profiles, telegram=telegram,
+            telegram_store=telegram_store, telegram=telegram,
         )
 
     async def reload_llm(self) -> None:
