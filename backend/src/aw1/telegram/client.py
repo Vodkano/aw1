@@ -78,6 +78,26 @@ class TelegramClient:
         except httpx.HTTPError:
             pass
 
+    async def send_photo(
+        self, token: str, chat_id: int | str, photo_url: str, caption: str = ""
+    ) -> bool:
+        """Manda una imagen por URL -Telegram la descarga el mismo, no hace
+        falta bajarla ni subirla desde aca. Nunca lanza: igual que
+        send_message, un fallo se registra pero no tumba el turno."""
+        try:
+            response = await self._client.post(
+                self._url(token, "sendPhoto"),
+                json={"chat_id": chat_id, "photo": photo_url, "caption": caption[:1024]},
+            )
+            payload = response.json()
+            if not payload.get("ok"):
+                logger.warning("Telegram rechazo la imagen: %s", payload.get("description"))
+                return False
+            return True
+        except (httpx.HTTPError, ValueError) as error:
+            logger.warning("No se pudo mandar la imagen a Telegram: %s", error)
+            return False
+
     async def send_message(self, token: str, chat_id: int | str, text: str) -> None:
         """Trocea si hace falta y respeta el limite de 1 msg/seg por chat.
         Nunca lanza: un fallo al mandar la respuesta se registra, no tumba

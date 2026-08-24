@@ -385,8 +385,22 @@ async def test_a_memory_recall_failure_does_not_crash_the_chat(repo, test_settin
     turno entero -debe degradar a responder sin ese contexto."""
     service, fake = await _build_service(repo, test_settings, None)
     with patch.object(repo, "search_items", side_effect=RuntimeError("db caida")):
-        events = await _collect(service.stream("hola, como estas?"))
+        # "hola, como estas?" es saludo (needs_memory=False, ver
+        # heuristics._SMALLTALK): ni siquiera intenta memory.recall(). Un
+        # mensaje que si necesita memoria por defecto es el que ejercita
+        # el bug real que este test cubre.
+        events = await _collect(service.stream("que auto tiene pedro?"))
     assert any(event.type == "done" for event in events)
+    assert fake.chat_calls
+
+
+async def test_a_greeting_skips_memory_recall_entirely(repo, test_settings):
+    """El pedido: poder decidir NO revisar la base cuando no hace falta, no
+    solo intentarlo siempre y a veces no encontrar nada."""
+    service, fake = await _build_service(repo, test_settings, None)
+    with patch.object(repo, "search_items", AsyncMock(return_value=[])) as search:
+        await _collect(service.stream("hola, como estas?"))
+    search.assert_not_called()
     assert fake.chat_calls
 
 
@@ -481,6 +495,110 @@ async def test_agent_apis_are_called_via_tool_calling_before_the_final_answer(re
     done = next(event for event in events if event.type == "done")
     assert done.data["answer"] == "Hay 5 unidades disponibles."
     assert done.data["source"] == "gpt"
+
+
+async def test_image_generation_is_called_via_tool_calling_and_yields_an_image_event(repo, tmp_path):
+    """El pedido: el modelo puede decidir usar otro modelo de GPT (DALL-E)
+    como herramienta para una funcion puntual -generar una imagen- sin que
+    eso cambie el contrato de eventos del resto de la respuesta."""
+    fake = FakeOllama(online=True)
+    judges = Judges(fake, model="mistral", timeout=5)
+    settings = Settings(_env_file=None, env="test", data_dir=tmp_path, openai_api_key="sk-test")
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    service = ChatService(
+        settings=settings, repository=repo, llm=fake, judges=judges,
+        wikipedia=Wikipedia(), secrets=secrets, tools=ToolRegistry([]),
+    )
+
+    tool_call_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_1", "type": "function",
+                    "function": {
+                        "name": "generar_imagen",
+                        "arguments": '{"prompt": "un gato con sombrero"}',
+                    },
+                }],
+            },
+        }],
+    })
+    final_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": "Aqui esta tu gato."},
+        }],
+    })
+
+    post_mock = AsyncMock(side_effect=[tool_call_response, final_response])
+    generate_mock = AsyncMock(return_value="https://cdn.openai.com/gato.png")
+    with (
+        patch("httpx.AsyncClient.post", new=post_mock),
+        patch("aw1.chat.service.image_gen.generate", new=generate_mock),
+    ):
+        events = await _collect(
+            service.stream(
+                "generame una imagen de un gato con sombrero",
+                force_gpt=True, allow_image_generation=True,
+            )
+        )
+
+    generate_mock.assert_awaited_once()
+    assert generate_mock.await_args.kwargs["model"] == settings.openai_image_model
+    image_event = next(event for event in events if event.type == "image")
+    assert image_event.data["url"] == "https://cdn.openai.com/gato.png"
+    done = next(event for event in events if event.type == "done")
+    assert done.data["answer"] == "Aqui esta tu gato."
+
+
+async def test_an_empty_reply_after_generating_an_image_still_gets_a_sensible_answer(
+    repo, tmp_path
+):
+    """Algunos modelos no agregan texto despues de una imagen -consideran
+    que la imagen ya es la respuesta. Eso no debe leerse como el error
+    generico de "GPT no devolvio contenido"."""
+    fake = FakeOllama(online=True)
+    judges = Judges(fake, model="mistral", timeout=5)
+    settings = Settings(_env_file=None, env="test", data_dir=tmp_path, openai_api_key="sk-test")
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    service = ChatService(
+        settings=settings, repository=repo, llm=fake, judges=judges,
+        wikipedia=Wikipedia(), secrets=secrets, tools=ToolRegistry([]),
+    )
+
+    tool_call_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_1", "type": "function",
+                    "function": {"name": "generar_imagen", "arguments": '{"prompt": "un perro"}'},
+                }],
+            },
+        }],
+    })
+    final_response = _FakeToolResponse({
+        "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": ""}}],
+    })
+
+    post_mock = AsyncMock(side_effect=[tool_call_response, final_response])
+    generate_mock = AsyncMock(return_value="https://cdn.openai.com/perro.png")
+    with (
+        patch("httpx.AsyncClient.post", new=post_mock),
+        patch("aw1.chat.service.image_gen.generate", new=generate_mock),
+    ):
+        events = await _collect(
+            service.stream("dibujame un perro", force_gpt=True, allow_image_generation=True)
+        )
+
+    done = next(event for event in events if event.type == "done")
+    assert done.data["answer"]
+    assert "no devolvio contenido" not in done.data["answer"].lower()
 
 
 async def test_without_agent_apis_the_normal_streaming_path_is_used(repo, test_settings):

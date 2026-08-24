@@ -404,7 +404,8 @@ export function AdminView() {
           <p className="mt-1 text-[13px] muted">
             Se usa automaticamente para codigo, analisis largo o actualidad -sin pedir
             permiso cada vez. La etiqueta bajo cada respuesta del chat avisa cuando vino
-            de aqui.
+            de aqui. Con esta clave configurada, los bots de Telegram tambien pueden
+            generar y mandar imagenes (DALL-E) cuando alguien se lo pide.
           </p>
           <Field
             label="Clave de OpenAI"

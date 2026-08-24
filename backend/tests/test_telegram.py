@@ -86,6 +86,7 @@ class FakeTelegramClient:
         self.bot_username = bot_username
         self.webhooks_set: list[tuple[str, str, str]] = []
         self.sent: list[tuple[str, Any, str]] = []
+        self.photos_sent: list[tuple[str, Any, str, str]] = []
         self.typing_calls: list[tuple[str, Any]] = []
 
     async def get_me(self, token: str) -> dict[str, Any] | None:
@@ -102,6 +103,12 @@ class FakeTelegramClient:
 
     async def send_message(self, token: str, chat_id: Any, text: str) -> None:
         self.sent.append((token, chat_id, text))
+
+    async def send_photo(
+        self, token: str, chat_id: Any, photo_url: str, caption: str = ""
+    ) -> bool:
+        self.photos_sent.append((token, chat_id, photo_url, caption))
+        return True
 
     async def send_chat_action(self, token: str, chat_id: Any, action: str = "typing") -> None:
         self.typing_calls.append((token, chat_id))
@@ -258,21 +265,26 @@ class FakeChatService:
     """Doble de ChatService: registra con que parametros se la llamo, sin
     tocar ningun modelo real."""
 
-    def __init__(self, *, answer: str = "ok") -> None:
+    def __init__(self, *, answer: str = "ok", image_url: str | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.answer = answer
+        self.image_url = image_url
 
     async def stream(self, message, *, conversation_id=None, system_prompt=None, force_gpt=False,
-                      history_hours=None, history_max_messages=60, fast_route=False, agent_apis=None):
+                      history_hours=None, history_max_messages=60, fast_route=False, agent_apis=None,
+                      allow_image_generation=False):
         self.calls.append(
             {
                 "message": message, "system_prompt": system_prompt, "force_gpt": force_gpt,
                 "history_hours": history_hours, "history_max_messages": history_max_messages,
                 "fast_route": fast_route, "agent_apis": agent_apis,
+                "allow_image_generation": allow_image_generation,
             }
         )
         from aw1.chat.events import ChatEvent
 
+        if self.image_url:
+            yield ChatEvent("image", {"url": self.image_url})
         yield ChatEvent("done", {"answer": self.answer})
 
 
@@ -352,12 +364,31 @@ async def test_a_message_without_urls_goes_through_the_normal_chat_path(repo, te
     assert call["history_hours"] == 72.0
     assert call["history_max_messages"] == 120
     assert call["fast_route"] is True
+    assert call["allow_image_generation"] is True
     # El prompt final es base + personalidad + lo propio del agente, no solo
     # lo que escribio el admin.
     assert "Vende zapatillas." in call["system_prompt"]
     assert "atencion al cliente" in call["system_prompt"]
     assert client.sent == [("123:ABC", 999, "ok")]
     assert client.typing_calls  # "escribiendo..." mientras se generaba la respuesta
+
+
+async def test_an_image_from_the_model_is_sent_as_a_photo_with_the_answer_as_caption(
+    repo, telegram_settings
+):
+    store, token = await _make_token(repo, telegram_settings, system_prompt="Vende zapatillas.")
+    client = FakeTelegramClient()
+    chat = FakeChatService(answer="Aqui la tienes.", image_url="https://cdn.openai.com/img.png")
+    orchestrator = await _make_orchestrator(repo, telegram_settings, store=store, chat=chat, client=client)
+
+    update = {"message": {"chat": {"id": 999}, "text": "generame una imagen de un gato"}}
+    await orchestrator._handle(token, update)
+
+    assert client.photos_sent == [
+        ("123:ABC", 999, "https://cdn.openai.com/img.png", "Aqui la tienes.")
+    ]
+    # El texto ya va como caption de la foto: no se manda ademas como mensaje aparte.
+    assert client.sent == []
 
 
 async def test_a_close_sentinel_from_the_model_mutes_the_chat(repo, telegram_settings):

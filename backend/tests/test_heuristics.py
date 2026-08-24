@@ -39,3 +39,29 @@ def test_merge_sin_respuesta_del_modelo_usa_heuristica() -> None:
     heuristic = heuristics.route("hola")
     merged = heuristics.merge(heuristic, None)
     assert merged is heuristic
+
+
+def test_un_saludo_no_necesita_revisar_memoria() -> None:
+    route = heuristics.route("hola, como estas?")
+    assert route.needs_memory is False
+
+
+def test_un_agradecimiento_no_necesita_revisar_memoria() -> None:
+    route = heuristics.route("gracias!")
+    assert route.needs_memory is False
+
+
+def test_charla_generica_si_necesita_revisar_memoria_por_defecto() -> None:
+    """Sin un enrutador con IA que lea la pregunta, el heuristico no puede
+    saber si "que auto tiene pedro?" depende de una nota guardada -por eso
+    el default sigue siendo intentarlo, igual que antes de esta decision.
+    Solo lo trivial (saludos, charla vacia) se descarta con certeza."""
+    route = heuristics.route("que auto tiene pedro?")
+    assert route.needs_memory is True
+
+
+def test_el_modelo_puede_decidir_no_revisar_memoria_para_charla() -> None:
+    heuristic = heuristics.route("que auto tiene pedro?")
+    modelo = ChatRoute(intent="charla", needs_memory=False)
+    merged = heuristics.merge(heuristic, modelo)
+    assert merged.needs_memory is False

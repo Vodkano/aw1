@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = "https://api.openai.com/v1"
+    # Modelo de imagenes que los agentes de Telegram pueden invocar como
+    # herramienta (ver chat/tools -> _answer_with_gpt_tools). dall-e-3 es el
+    # mas barato de los que devuelven buena calidad razonable por defecto.
+    openai_image_model: str = "dall-e-3"
 
     # -- busqueda web opcional (herramienta @buscar) -------------------------
     # Brave Search API: clave simple (un solo header), tiene capa gratuita, y

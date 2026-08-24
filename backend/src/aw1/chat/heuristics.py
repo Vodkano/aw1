@@ -37,6 +37,18 @@ _FRESH = (
     r"\b(?:hoy|ahora|actual|actualmente|ultimas?|reciente|noticias?|clima|dolar|euro|bitcoin)\b",
     r"\b20(?:2[6-9]|[3-9]\d)\b",
 )
+# Sin enrutador con IA disponible (Ollama caido, o el fast_route de
+# Telegram), esto decide needs_memory: nada tan preciso como que el modelo
+# lea la pregunta, asi que solo cubre lo obvio -saludos y charla trivial que
+# claramente no depende de nada guardado. Todo lo demas en "charla"/"codigo"
+# sigue revisando notas por defecto (ChatRoute.needs_memory=True), igual que
+# antes de que existiera esta decision.
+_SMALLTALK = (
+    r"^(?:hola+|holis|buenas|buen dia|buenos dias|buenas tardes|buenas noches|"
+    r"hey|que tal|como estas|todo bien)\b",
+    r"^(?:gracias|muchas gracias|de nada|ok|okay|dale|listo|perfecto)\b",
+    r"^(?:chau|adios|nos vemos|hasta luego|hasta pronto)\b",
+)
 
 
 def strip_accents(text: str) -> str:
@@ -97,6 +109,11 @@ def route(message: str) -> ChatRoute:
         return ChatRoute(
             intent="actualidad", needs_fresh_data=True, search_terms=canon,
             confidence=0.6, reason="Necesita datos actuales.",
+        )
+    if any(re.search(pattern, canon) for pattern in _SMALLTALK):
+        return ChatRoute(
+            intent="charla", needs_memory=False, confidence=0.6,
+            reason="Saludo o charla trivial, no depende de nada guardado.",
         )
     return ChatRoute(intent="charla", confidence=0.55, reason="Conversacion general.")
 

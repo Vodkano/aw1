@@ -181,6 +181,7 @@ class TelegramOrchestrator:
                 conversation_id = f"telegram:{token_id}:{chat_id}"
                 system_prompt = _compose_system_prompt(token)
                 answer = ""
+                image_url: str | None = None
                 try:
                     # force_gpt: los agentes de Telegram usan GPT siempre,
                     # sin la heuristica "Ollama primero" de la web.
@@ -191,15 +192,21 @@ class TelegramOrchestrator:
                     # incluido, hasta 25s) -era el principal cuello de
                     # botella de latencia del bot, y con force_gpt esa
                     # clasificacion ya no decide nada sobre que modelo
-                    # responde.
+                    # responde. allow_image_generation: el modelo puede
+                    # generar y mandar una imagen (DALL-E) cuando la piden
+                    # -sin costo de streaming perdido, Telegram igual recibe
+                    # la respuesta entera de una vez.
                     async for event in self._chat.stream(
                         text, conversation_id=conversation_id, system_prompt=system_prompt,
                         force_gpt=True, history_hours=self._settings.telegram_history_hours,
                         history_max_messages=self._settings.telegram_history_max_messages,
                         fast_route=True, agent_apis=token.get("apis") or None,
+                        allow_image_generation=True,
                     ):
                         if event.type == "done":
                             answer = str(event.data.get("answer", ""))
+                        elif event.type == "image":
+                            image_url = str(event.data.get("url", "")) or None
                 except Aw1Error as error:
                     answer = error.message
 
@@ -210,7 +217,17 @@ class TelegramOrchestrator:
                         token_id, str(chat_id), "mala intencion detectada por el modelo", until
                     )
 
-                if answer:
+                if image_url:
+                    sent = await self._client.send_photo(
+                        token["bot_token"], chat_id, image_url, caption=answer[:1024]
+                    )
+                    if not sent and answer:
+                        await self._client.send_message(token["bot_token"], chat_id, answer)
+                    elif sent and len(answer) > 1024:
+                        await self._client.send_message(
+                            token["bot_token"], chat_id, answer[1024:].strip()
+                        )
+                elif answer:
                     await self._client.send_message(token["bot_token"], chat_id, answer)
             except Exception:  # noqa: BLE001 - nadie mas esta esperando esta tarea
                 logger.exception("Fallo procesando un mensaje de Telegram (token %s).", token_id)

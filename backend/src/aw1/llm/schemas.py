@@ -117,6 +117,12 @@ class ChatRoute(BaseModel):
     # razonamiento complejo): se responde con GPT automaticamente si esta
     # configurado, sin pedir confirmacion. Charla simple se queda en Ollama.
     heavy: bool = False
+    # Si el mensaje se beneficia de revisar las notas guardadas (saved_items)
+    # antes de responder -charla/codigo con esto en false responde directo,
+    # sin tocar la base de datos. Default true: preserva el comportamiento
+    # previo (siempre se intentaba) cuando no hay enrutador con IA disponible
+    # y decide el heuristico local, mas conservador.
+    needs_memory: bool = True
     person: str = ""
     search_terms: str = ""
     confidence: float = 0.5

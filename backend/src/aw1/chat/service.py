@@ -14,9 +14,11 @@ Recorrido de un mensaje:
        interfaz avisa despues, mostrando de que modelo vino la respuesta.
        Sin clave configurada, cae al modelo local y se explica por que.
        Una mencion "@gpt"/"@ollama" fuerza esta decision para ese mensaje.
-    6. Biografia -> Wikipedia. Charla/codigo -> se suma contexto de la
-       memoria guardada a mano (solo lectura, ver chat/memory.py) si algo
-       calza. El modelo local (o GPT, si aplica) redacta con ese contexto.
+    6. Biografia -> Wikipedia. Charla/codigo -> si el enrutador decide que
+       conviene (route.needs_memory), se suma contexto de la memoria
+       guardada a mano (solo lectura, ver chat/memory.py); si no, responde
+       directo, sin tocar la base. El modelo local (o GPT, si aplica)
+       redacta con ese contexto cuando existe.
 
 Todo sale como eventos para que la interfaz escriba token a token.
 """
@@ -34,7 +36,7 @@ from typing import Any
 import httpx
 
 from ..core import agent_apis as agent_apis_module
-from ..core import llm_provider
+from ..core import image_gen, llm_provider
 from ..core.agent_apis import tool_name as _api_tool_name
 from ..core.errors import ProviderError, ValidationError
 from ..core.secrets_store import SecretsStore
@@ -117,6 +119,39 @@ def _api_tool_def(api: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Herramienta nativa (no configurada por el admin, siempre igual): el modelo
+# la usa cuando la persona pide una imagen. Solo se ofrece cuando quien llama
+# a _answer_with_gpt_tools pasa allow_image_generation=True -por ahora, solo
+# los agentes de Telegram (ver TelegramOrchestrator), donde no hay streaming
+# de por medio que perder.
+_IMAGE_TOOL_NAME = "generar_imagen"
+_IMAGE_TOOL_DEF: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": _IMAGE_TOOL_NAME,
+        "description": (
+            "Genera una imagen a partir de una descripcion en texto y se la "
+            "manda a la persona. Usala SOLO cuando piden explicitamente una "
+            "imagen, dibujo, foto generada o algo visual -nunca para "
+            "responder con texto normal."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": (
+                        "Descripcion detallada de la imagen a generar. En "
+                        "ingles si es posible, da mejores resultados."
+                    ),
+                }
+            },
+            "required": ["prompt"],
+        },
+    },
+}
+
+
 class ChatService:
     def __init__(
         self,
@@ -162,6 +197,7 @@ class ChatService:
         history_max_messages: int = 60,
         fast_route: bool = False,
         agent_apis: list[dict[str, Any]] | None = None,
+        allow_image_generation: bool = False,
     ) -> AsyncIterator[ChatEvent]:
         clean = " ".join(str(message or "").split())
         if not clean:
@@ -250,7 +286,7 @@ class ChatService:
                     f"{extract}\n{url}",
                 )
                 yield ChatEvent("source", {"url": url, "kind": "wikipedia"})
-        elif route.intent in {"charla", "codigo"}:
+        elif route.intent in {"charla", "codigo"} and route.needs_memory:
             try:
                 context_block = await memory.recall(self._repo, route, clean)
             except Exception:  # noqa: BLE001 - un fallo de memoria no debe tumbar el chat
@@ -259,16 +295,18 @@ class ChatService:
         if wants_gpt:
             if self.gpt_configured():
                 try:
-                    if agent_apis:
-                        # Con APIs configuradas se resigna el streaming: el
-                        # protocolo de tool calling de OpenAI necesita poder
-                        # ir y volver con el resultado de cada llamada antes
-                        # de la respuesta final -mas simple y confiable sin
-                        # streaming a medio camino. Sin APIs configuradas
-                        # (el caso normal), el camino de siempre no cambia.
+                    if agent_apis or allow_image_generation:
+                        # Con APIs configuradas (o generacion de imagenes
+                        # habilitada) se resigna el streaming: el protocolo
+                        # de tool calling de OpenAI necesita poder ir y
+                        # volver con el resultado de cada llamada antes de
+                        # la respuesta final -mas simple y confiable sin
+                        # streaming a medio camino. En el caso normal (sin
+                        # ninguna de las dos) el camino de siempre no cambia.
                         async for event in self._answer_with_gpt_tools(
                             conversation, clean, history, context_block, sources,
-                            system_prompt=system_prompt, agent_apis=agent_apis,
+                            system_prompt=system_prompt, agent_apis=agent_apis or [],
+                            allow_image_generation=allow_image_generation,
                         ):
                             yield event
                     else:
@@ -487,13 +525,15 @@ class ChatService:
         *,
         system_prompt: str | None = None,
         agent_apis: list[dict[str, Any]],
+        allow_image_generation: bool = False,
     ) -> AsyncIterator[ChatEvent]:
-        """Como _answer_with_gpt, pero con las APIs del agente disponibles
-        como tool calling de OpenAI -el modelo decide si necesita llamar
-        alguna antes de responder. Sin streaming: el protocolo de ida y
-        vuelta con el resultado de cada llamada no es compatible con leer
-        la respuesta token a token, y a diferencia del camino normal esto
-        solo se usa cuando el agente tiene APIs configuradas."""
+        """Como _answer_with_gpt, pero con las APIs del agente (y, si
+        allow_image_generation, generar_imagen) disponibles como tool
+        calling de OpenAI -el modelo decide si necesita llamar alguna antes
+        de responder. Sin streaming: el protocolo de ida y vuelta con el
+        resultado de cada llamada no es compatible con leer la respuesta
+        token a token, y a diferencia del camino normal esto solo se usa
+        cuando hace falta al menos una de las dos."""
         sources = sources or []
         user_content = f"{context_block}\n\n{message}" if context_block else message
         messages: list[dict[str, Any]] = [
@@ -503,8 +543,11 @@ class ChatService:
         ]
         tools = [_api_tool_def(api) for api in agent_apis]
         apis_by_tool_name = {_api_tool_def(api)["function"]["name"]: api for api in agent_apis}
+        if allow_image_generation:
+            tools.append(_IMAGE_TOOL_DEF)
         headers = {"Authorization": f"Bearer {self._openai_key()}"}
         base = self._settings.openai_base_url.rstrip("/")
+        image_sent = False
 
         # Tope de vueltas ida-y-vuelta con herramientas: un modelo que
         # insiste en llamar herramientas sin nunca responder no puede
@@ -535,11 +578,17 @@ class ChatService:
             if not tool_calls:
                 answer = str(assistant_message.get("content") or "").strip()
                 if not answer:
-                    async for event in self._say(
-                        conversation, message, "GPT no devolvio contenido.", "system"
-                    ):
-                        yield event
-                    return
+                    # Algunos modelos no agregan texto despues de generar la
+                    # imagen (la consideran la respuesta en si): eso no es
+                    # un error si la imagen ya se mando.
+                    if image_sent:
+                        answer = "Listo, ahi tienes la imagen."
+                    else:
+                        async for event in self._say(
+                            conversation, message, "GPT no devolvio contenido.", "system"
+                        ):
+                            yield event
+                        return
                 yield ChatEvent("token", {"text": answer})
                 await self._persist(conversation, message, answer, "gpt")
                 yield ChatEvent(
@@ -554,15 +603,21 @@ class ChatService:
             messages.append(assistant_message)
             for call in tool_calls:
                 name = call.get("function", {}).get("name", "")
-                api = apis_by_tool_name.get(name)
                 try:
                     args = json.loads(call.get("function", {}).get("arguments") or "{}")
                 except ValueError:
                     args = {}
-                if api is None:
-                    result_text = "Error: esa herramienta no existe."
+                if name == _IMAGE_TOOL_NAME:
+                    result_text, image_url = await self._generate_image(str(args.get("prompt", "")))
+                    if image_url:
+                        image_sent = True
+                        yield ChatEvent("image", {"url": image_url})
                 else:
-                    result_text = await agent_apis_module.call(api, str(args.get("query", "")))
+                    api = apis_by_tool_name.get(name)
+                    if api is None:
+                        result_text = "Error: esa herramienta no existe."
+                    else:
+                        result_text = await agent_apis_module.call(api, str(args.get("query", "")))
                 messages.append(
                     {"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text}
                 )
@@ -571,6 +626,22 @@ class ChatService:
             conversation, message, "No pude completar la consulta a tiempo.", "system"
         ):
             yield event
+
+    async def _generate_image(self, prompt: str) -> tuple[str, str | None]:
+        """Nunca lanza -un fallo se convierte en el texto que ve el modelo
+        como resultado de la herramienta, mismo trato que agent_apis.call.
+        Devuelve (texto para el modelo, URL de la imagen o None si fallo)."""
+        prompt = prompt.strip()
+        if not prompt:
+            return "Error: hace falta una descripcion para generar la imagen.", None
+        try:
+            url = await image_gen.generate(
+                prompt, api_key=self._openai_key(), base_url=self._settings.openai_base_url,
+                model=self._settings.openai_image_model,
+            )
+        except (httpx.HTTPError, RuntimeError) as error:
+            return f"Error generando la imagen: {error}", None
+        return "Imagen generada y ya se le mando a la persona.", url
 
     @staticmethod
     def _explain_gpt(status: int) -> str:

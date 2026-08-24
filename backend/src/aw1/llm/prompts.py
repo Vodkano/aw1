@@ -242,6 +242,7 @@ decides quien deberia responder. Responde SOLO con este objeto JSON:
   "intent": "charla | biografia | codigo | actualidad | precio | confuso",
   "needs_fresh_data": false,
   "heavy": false,
+  "needs_memory": true,
   "person": "nombre propio si preguntan por una persona real, si no vacio",
   "search_terms": "terminos utiles para buscar, o vacio",
   "confidence": 0.8,
@@ -267,25 +268,39 @@ al modelo fuerte cuando de verdad hace falta -consume una API de pago, hay
 que ser selectivo. Si "heavy" es true y hay un modelo mas fuerte configurado,
 se usa automaticamente: no se le pregunta a la persona antes.
 
-Ejemplos (mensaje -> intent / needs_fresh_data / heavy):
-- "hola, como estas?" -> charla / false / false
-- "gracias!" -> charla / false / false
-- "que es una variable en programacion?" -> codigo / false / false
-  (pregunta corta y generica, no pide escribir ni depurar nada: el modelo
-  local la responde bien)
-- "escribe una funcion en python que ordene una lista" -> codigo / false / false
-  (una funcion de una linea, trivial)
-- "tengo este stacktrace de 40 lineas, ayudame a encontrar el bug" -> codigo / false / true
-  (razonamiento en varios pasos sobre codigo real, no trivial)
-- "escribeme un ensayo de 800 palabras sobre el cambio climatico" -> charla / false / true
-  (escritura extensa)
-- "resume estos tres documentos y compara sus argumentos" -> charla / false / true
-  (analisis largo en varios pasos)
-- "cual es el dolar hoy?" -> actualidad / true / false
+"needs_memory": marca true cuando conviene revisar las notas que la persona
+guardo a mano antes de responder -pregunta por un dato especifico o
+personal (un nombre, una fecha, un numero, algo suyo) que bien podria estar
+anotado, o hace referencia directa a algo dicho/guardado antes ("recuerdas
+que...", "que habiamos quedado", "lo que anote de..."). Marca false en
+saludos, despedidas, agradecimientos, charla trivial, y preguntas de
+conocimiento general que no dependen de nada personal -revisar la base ahi
+es trabajo de mas que no cambia la respuesta. Solo aplica a "charla" y
+"codigo": en el resto de los intents no se usa, poné el valor que sea.
+
+Ejemplos (mensaje -> intent / needs_fresh_data / heavy / needs_memory):
+- "hola, como estas?" -> charla / false / false / false
+- "gracias!" -> charla / false / false / false
+- "que auto tiene pedro?" -> charla / false / false / true
+  (dato especifico y personal, puede estar anotado)
+- "recuerdas cual era la clave del router?" -> charla / false / false / true
+- "que es una variable en programacion?" -> codigo / false / false / false
+  (pregunta corta y generica, no pide escribir ni depurar nada, y no
+  depende de nada personal: el modelo local la responde bien sin revisar nada)
+- "escribe una funcion en python que ordene una lista" -> codigo / false / false / false
+  (una funcion de una linea, trivial, generica)
+- "tengo este stacktrace de 40 lineas, ayudame a encontrar el bug" -> codigo / false / true / false
+  (razonamiento en varios pasos sobre codigo real, pero no depende de nada
+  guardado)
+- "escribeme un ensayo de 800 palabras sobre el cambio climatico" -> charla / false / true / false
+  (escritura extensa, tema generico)
+- "resume estos tres documentos y compara sus argumentos" -> charla / false / true / false
+  (analisis largo en varios pasos, pero no depende de notas guardadas)
+- "cual es el dolar hoy?" -> actualidad / true / false / false
   (dato fresco, pero la respuesta en si es corta: no hace falta "heavy")
-- "quien es el actual presidente de Francia?" -> biografia / true / false
+- "quien es el actual presidente de Francia?" -> biografia / true / false / false
   (biografia SIEMPRE va por Wikipedia, sin importar needs_fresh_data/heavy)
-- "cuanto cuesta un iphone 15?" -> precio / false / false
+- "cuanto cuesta un iphone 15?" -> precio / false / false / false
 
 Corrige mentalmente las faltas de ortografia antes de decidir.
 """
