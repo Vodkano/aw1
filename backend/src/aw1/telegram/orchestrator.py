@@ -26,7 +26,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..chat.service import ChatService
+from ..core import llm_provider, moderation
 from ..core.errors import Aw1Error
+from ..core.secrets_store import SecretsStore
 from ..core.telegram_store import TelegramStore
 from ..db.postgres_repository import PostgresRepository
 from ..db.repository import Repository
@@ -56,6 +58,12 @@ _MUTED_REPLY = (
     "Esta conversacion quedo cerrada por ahora. Si crees que es un error, "
     "escribenos mas tarde."
 )
+_MODERATED_REPLY = "No puedo ayudarte con eso. Si crees que es un error, escribenos mas tarde."
+_NON_TEXT_REPLY = (
+    "Por ahora solo puedo leer mensajes de texto -contame en palabras en "
+    "que te ayudo."
+)
+_ERROR_REPLY = "Hubo un problema respondiendo. Intenta de nuevo."
 
 
 def _compose_system_prompt(token: dict[str, Any]) -> str:
@@ -73,12 +81,15 @@ class TelegramOrchestrator:
     def __init__(
         self, *, tokens: TelegramStore, client: TelegramClient, chat: ChatService,
         prices: PricePipeline, repo: Repository | PostgresRepository, settings: Settings,
+        secrets: SecretsStore,
     ) -> None:
         self._tokens = tokens
         self._client = client
         self._chat = chat
         self._prices = prices
         self._repo = repo
+        self._settings = settings
+        self._secrets = secrets
         self._interval = settings.price_watch_interval_seconds
         # Referencias fuertes a las tareas en vuelo: sin esto, asyncio puede
         # recolectar la tarea a mitad de camino y la respuesta simplemente
@@ -107,13 +118,20 @@ class TelegramOrchestrator:
             return
         chat = message.get("chat") or {}
         chat_id = chat.get("id")
-        text = message.get("text")
-        if chat_id is None or not isinstance(text, str) or not text.strip():
+        if chat_id is None:
             return
+        text = message.get("text")
 
         token_id = token["id"]
         typing = asyncio.create_task(self._keep_typing(token["bot_token"], chat_id))
         try:
+            if not isinstance(text, str) or not text.strip():
+                # Fotos, notas de voz, stickers, documentos: por ahora el
+                # bot solo entiende texto. Mejor decirlo que dejar a la
+                # persona esperando una respuesta que nunca llega.
+                await self._client.send_message(token["bot_token"], chat_id, _NON_TEXT_REPLY)
+                return
+
             # Corte de conversacion vigente: ni se llama al modelo. Es
             # exactamente lo que ahorra tokens en un chat que ya se
             # identifico como abusivo o sin sentido.
@@ -121,47 +139,74 @@ class TelegramOrchestrator:
                 await self._client.send_message(token["bot_token"], chat_id, _MUTED_REPLY)
                 return
 
-            urls = _URL_RE.findall(text)
-            if urls:
-                await self._register_watch(token, chat_id, text, urls)
-                return
-
-            conversation_id = f"telegram:{token_id}:{chat_id}"
-            system_prompt = _compose_system_prompt(token)
-            answer = ""
+            # Todo lo que sigue puede fallar de formas que no se preveen
+            # (un timeout raro, un bug); sea cual sea el motivo, la persona
+            # del otro lado siempre tiene que recibir algo, no silencio.
             try:
-                # force_gpt: los agentes de Telegram usan GPT siempre, sin la
-                # heuristica "Ollama primero" de la web. history_hours:
-                # memoria por chat limitada a las ultimas 48h. fast_route:
-                # se salta la clasificacion por IA (viaja a Ollama, tunel
-                # incluido, hasta 25s) -era el principal cuello de botella
-                # de latencia del bot, y con force_gpt esa clasificacion ya
-                # no decide nada sobre que modelo responde.
-                async for event in self._chat.stream(
-                    text, conversation_id=conversation_id, system_prompt=system_prompt,
-                    force_gpt=True, history_hours=48.0, fast_route=True,
-                ):
-                    if event.type == "done":
-                        answer = str(event.data.get("answer", ""))
-            except Aw1Error as error:
-                answer = error.message
+                urls = _URL_RE.findall(text)
+                if urls:
+                    await self._register_watch(token, chat_id, text, urls)
+                    return
+
+                if await self._is_flagged(text):
+                    until = (datetime.now(UTC) + timedelta(hours=_MUTE_COOLDOWN_HOURS)).isoformat()
+                    await self._repo.mute_telegram_chat(
+                        token_id, str(chat_id), "contenido marcado por moderacion", until
+                    )
+                    await self._client.send_message(
+                        token["bot_token"], chat_id, _MODERATED_REPLY
+                    )
+                    return
+
+                conversation_id = f"telegram:{token_id}:{chat_id}"
+                system_prompt = _compose_system_prompt(token)
+                answer = ""
+                try:
+                    # force_gpt: los agentes de Telegram usan GPT siempre,
+                    # sin la heuristica "Ollama primero" de la web.
+                    # history_hours: memoria por chat limitada a las
+                    # ultimas 48h. fast_route: se salta la clasificacion
+                    # por IA (viaja a Ollama, tunel incluido, hasta 25s)
+                    # -era el principal cuello de botella de latencia del
+                    # bot, y con force_gpt esa clasificacion ya no decide
+                    # nada sobre que modelo responde.
+                    async for event in self._chat.stream(
+                        text, conversation_id=conversation_id, system_prompt=system_prompt,
+                        force_gpt=True, history_hours=48.0, fast_route=True,
+                    ):
+                        if event.type == "done":
+                            answer = str(event.data.get("answer", ""))
+                except Aw1Error as error:
+                    answer = error.message
+
+                if TELEGRAM_CLOSE_SENTINEL in answer:
+                    answer = answer.replace(TELEGRAM_CLOSE_SENTINEL, "").strip()
+                    until = (datetime.now(UTC) + timedelta(hours=_MUTE_COOLDOWN_HOURS)).isoformat()
+                    await self._repo.mute_telegram_chat(
+                        token_id, str(chat_id), "mala intencion detectada por el modelo", until
+                    )
+
+                if answer:
+                    await self._client.send_message(token["bot_token"], chat_id, answer)
             except Exception:  # noqa: BLE001 - nadie mas esta esperando esta tarea
                 logger.exception("Fallo procesando un mensaje de Telegram (token %s).", token_id)
-                answer = "Hubo un problema respondiendo. Intenta de nuevo."
-
-            if TELEGRAM_CLOSE_SENTINEL in answer:
-                answer = answer.replace(TELEGRAM_CLOSE_SENTINEL, "").strip()
-                until = (datetime.now(UTC) + timedelta(hours=_MUTE_COOLDOWN_HOURS)).isoformat()
-                await self._repo.mute_telegram_chat(
-                    token_id, str(chat_id), "mala intencion detectada por el modelo", until
-                )
-
-            if answer:
-                await self._client.send_message(token["bot_token"], chat_id, answer)
+                await self._client.send_message(token["bot_token"], chat_id, _ERROR_REPLY)
         finally:
             typing.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await typing
+
+    async def _is_flagged(self, text: str) -> bool:
+        """Filtro rapido y gratuito antes de gastar la llamada completa a
+        GPT (ver core/moderation.py). Fail-open: si no hay clave o el
+        servicio de moderacion falla, no bloquea la conversacion."""
+        key = llm_provider.openai_key(self._settings, self._secrets)
+        result = await moderation.check(text, api_key=key, base_url=self._settings.openai_base_url)
+        if result.flagged:
+            logger.info(
+                "Moderacion marco un mensaje de Telegram: %s", ", ".join(result.categories)
+            )
+        return result.flagged
 
     async def _keep_typing(self, bot_token: str, chat_id: int) -> None:
         """Mientras el turno esta en curso, la persona ve "escribiendo...":

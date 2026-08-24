@@ -91,7 +91,7 @@ class Container:
         )
         telegram = TelegramOrchestrator(
             tokens=telegram_store, client=telegram_client, chat=chat,
-            prices=prices, repo=repo, settings=settings,
+            prices=prices, repo=repo, settings=settings, secrets=secrets,
         )
         return cls(
             settings=settings, repo=repo, llm=llm, judges=judges, browser=browser,
