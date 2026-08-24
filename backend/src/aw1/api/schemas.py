@@ -153,6 +153,46 @@ class UpdateTelegramAgentRequest(BaseModel):
     enabled: bool = True
 
 
+class TelegramAgentFileSummary(BaseModel):
+    id: str
+    agent_id: str
+    filename: str
+    char_count: int
+    created_at: datetime
+
+
+class TelegramAgentApiSummary(BaseModel):
+    id: str
+    agent_id: str
+    name: str
+    description: str
+    url: str
+    method: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateTelegramAgentApiRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(min_length=1, max_length=500)
+    url: str = Field(min_length=1, max_length=2048)
+    method: str = Field(default="GET", max_length=10)
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class UpdateTelegramAgentApiRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Solo activar/desactivar -no re-editar la URL o los headers, que
+    # pueden traer credenciales: mismo criterio que los tokens de bots
+    # (nunca se re-exponen al frontend despues de crearlos). Para cambiar
+    # la URL/headers de una API, se borra y se crea de nuevo.
+    enabled: bool = True
+
+
 class TelegramAgentSummary(BaseModel):
     id: str
     label: str
@@ -162,6 +202,8 @@ class TelegramAgentSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     tokens: list[TelegramTokenSummary] = Field(default_factory=list)
+    files: list[TelegramAgentFileSummary] = Field(default_factory=list)
+    apis: list[TelegramAgentApiSummary] = Field(default_factory=list)
 
 
 class GeneratePromptRequest(BaseModel):

@@ -57,6 +57,23 @@ def _telegram_token_from_row(row: aiosqlite.Row) -> dict[str, Any]:
     }
 
 
+def _agent_file_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "agent_id": row["agent_id"], "filename": row["filename"],
+        "content": row["content"], "char_count": row["char_count"],
+        "created_at": _parse(row["created_at"]),
+    }
+
+
+def _agent_api_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "agent_id": row["agent_id"], "name": row["name"],
+        "description": row["description"], "url": row["url"], "method": row["method"],
+        "headers": json.loads(row["headers"]), "enabled": bool(row["enabled"]),
+        "created_at": _parse(row["created_at"]), "updated_at": _parse(row["updated_at"]),
+    }
+
+
 def _price_watch_from_row(row: aiosqlite.Row) -> dict[str, Any]:
     return {
         "id": row["id"], "token_id": row["token_id"], "chat_id": row["chat_id"],
@@ -658,6 +675,115 @@ class Repository:
         if row is None:
             return None
         return {"reason": row["reason"], "muted_until": _parse(row["muted_until"])}
+
+    # -- archivos que un agente conoce de memoria ----------------------------
+    async def create_telegram_agent_file(
+        self, file_id: str, agent_id: str, filename: str, content: str, char_count: int
+    ) -> dict[str, Any]:
+        now = utcnow()
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO telegram_agent_files (id, agent_id, filename, content, "
+                "char_count, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (file_id, agent_id, filename, content, char_count, _iso(now)),
+            )
+            await self._conn.commit()
+        return {
+            "id": file_id, "agent_id": agent_id, "filename": filename, "content": content,
+            "char_count": char_count, "created_at": now,
+        }
+
+    async def list_telegram_agent_files(self, agent_id: str) -> list[dict[str, Any]]:
+        cursor = await self._conn.execute(
+            "SELECT id, agent_id, filename, content, char_count, created_at "
+            "FROM telegram_agent_files WHERE agent_id = ? ORDER BY created_at",
+            (agent_id,),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [_agent_file_from_row(row) for row in rows]
+
+    async def get_telegram_agent_file(self, file_id: str) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(
+            "SELECT id, agent_id, filename, content, char_count, created_at "
+            "FROM telegram_agent_files WHERE id = ?",
+            (file_id,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _agent_file_from_row(row) if row else None
+
+    async def delete_telegram_agent_file(self, file_id: str) -> bool:
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "DELETE FROM telegram_agent_files WHERE id = ?", (file_id,)
+            )
+            await self._conn.commit()
+            return bool(cursor.rowcount)
+
+    # -- APIs externas que un agente puede invocar en vivo -------------------
+    async def create_telegram_agent_api(
+        self, api_id: str, agent_id: str, name: str, description: str, url: str,
+        method: str, headers_json: str,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO telegram_agent_apis (id, agent_id, name, description, url, "
+                "method, headers, enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (api_id, agent_id, name, description, url, method, headers_json,
+                 _iso(now), _iso(now)),
+            )
+            await self._conn.commit()
+        return {
+            "id": api_id, "agent_id": agent_id, "name": name, "description": description,
+            "url": url, "method": method, "headers": json.loads(headers_json),
+            "enabled": True, "created_at": now, "updated_at": now,
+        }
+
+    async def list_telegram_agent_apis(self, agent_id: str) -> list[dict[str, Any]]:
+        cursor = await self._conn.execute(
+            "SELECT id, agent_id, name, description, url, method, headers, enabled, "
+            "created_at, updated_at FROM telegram_agent_apis "
+            "WHERE agent_id = ? ORDER BY created_at",
+            (agent_id,),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [_agent_api_from_row(row) for row in rows]
+
+    async def get_telegram_agent_api(self, api_id: str) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(
+            "SELECT id, agent_id, name, description, url, method, headers, enabled, "
+            "created_at, updated_at FROM telegram_agent_apis WHERE id = ?",
+            (api_id,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _agent_api_from_row(row) if row else None
+
+    async def set_telegram_agent_api_enabled(
+        self, api_id: str, enabled: bool
+    ) -> dict[str, Any] | None:
+        now = utcnow()
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "UPDATE telegram_agent_apis SET enabled = ?, updated_at = ? WHERE id = ?",
+                (int(enabled), _iso(now), api_id),
+            )
+            await self._conn.commit()
+            if not cursor.rowcount:
+                return None
+        return await self.get_telegram_agent_api(api_id)
+
+    async def delete_telegram_agent_api(self, api_id: str) -> bool:
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "DELETE FROM telegram_agent_apis WHERE id = ?", (api_id,)
+            )
+            await self._conn.commit()
+            return bool(cursor.rowcount)
 
     # -- borrado total ------------------------------------------------------
     async def purge(self, tables: Sequence[str] | None = None) -> dict[str, int]:

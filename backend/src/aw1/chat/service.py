@@ -23,6 +23,7 @@ Todo sale como eventos para que la interfaz escriba token a token.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
@@ -32,7 +33,9 @@ from typing import Any
 
 import httpx
 
+from ..core import agent_apis as agent_apis_module
 from ..core import llm_provider
+from ..core.agent_apis import tool_name as _api_tool_name
 from ..core.errors import ProviderError, ValidationError
 from ..core.secrets_store import SecretsStore
 from ..db.postgres_repository import PostgresRepository
@@ -87,6 +90,33 @@ MENTION_PROVIDERS = tuple(
 )
 
 
+def _api_tool_def(api: dict[str, Any]) -> dict[str, Any]:
+    """Convierte una API configurada por el admin en una funcion invocable
+    por el modelo (tool calling de OpenAI). "query" es generico a proposito
+    -no todas las APIs necesitan un dato, y el admin decide si su URL lo
+    usa (ver core/agent_apis.py: se sustituye si la URL trae "{query}")."""
+    return {
+        "type": "function",
+        "function": {
+            "name": _api_tool_name(str(api.get("name") or "api")),
+            "description": str(api.get("description") or "")[:500],
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Dato que necesita la consulta, si aplica "
+                            "(ej. un codigo, nombre o id)."
+                        ),
+                    }
+                },
+                "required": [],
+            },
+        },
+    }
+
+
 class ChatService:
     def __init__(
         self,
@@ -130,6 +160,7 @@ class ChatService:
         force_gpt: bool = False,
         history_hours: float | None = None,
         fast_route: bool = False,
+        agent_apis: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         clean = " ".join(str(message or "").split())
         if not clean:
@@ -225,11 +256,24 @@ class ChatService:
         if wants_gpt:
             if self.gpt_configured():
                 try:
-                    async for event in self._answer_with_gpt(
-                        conversation, clean, history, context_block, sources,
-                        system_prompt=system_prompt,
-                    ):
-                        yield event
+                    if agent_apis:
+                        # Con APIs configuradas se resigna el streaming: el
+                        # protocolo de tool calling de OpenAI necesita poder
+                        # ir y volver con el resultado de cada llamada antes
+                        # de la respuesta final -mas simple y confiable sin
+                        # streaming a medio camino. Sin APIs configuradas
+                        # (el caso normal), el camino de siempre no cambia.
+                        async for event in self._answer_with_gpt_tools(
+                            conversation, clean, history, context_block, sources,
+                            system_prompt=system_prompt, agent_apis=agent_apis,
+                        ):
+                            yield event
+                    else:
+                        async for event in self._answer_with_gpt(
+                            conversation, clean, history, context_block, sources,
+                            system_prompt=system_prompt,
+                        ):
+                            yield event
                     return
                 except ProviderError as error:
                     # Clave configurada pero invalida, GPT caido, etc.: se
@@ -404,8 +448,6 @@ class ChatService:
                     if chunk == "[DONE]":
                         break
                     try:
-                        import json
-
                         delta = json.loads(chunk)["choices"][0]["delta"]
                     except (ValueError, KeyError, IndexError):
                         continue
@@ -431,6 +473,101 @@ class ChatService:
                 "conversation_id": conversation,
             },
         )
+
+    async def _answer_with_gpt_tools(
+        self,
+        conversation: str,
+        message: str,
+        history: list[dict[str, str]],
+        context_block: str = "",
+        sources: list[str] | None = None,
+        *,
+        system_prompt: str | None = None,
+        agent_apis: list[dict[str, Any]],
+    ) -> AsyncIterator[ChatEvent]:
+        """Como _answer_with_gpt, pero con las APIs del agente disponibles
+        como tool calling de OpenAI -el modelo decide si necesita llamar
+        alguna antes de responder. Sin streaming: el protocolo de ida y
+        vuelta con el resultado de cada llamada no es compatible con leer
+        la respuesta token a token, y a diferencia del camino normal esto
+        solo se usa cuando el agente tiene APIs configuradas."""
+        sources = sources or []
+        user_content = f"{context_block}\n\n{message}" if context_block else message
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt or GPT_SYSTEM},
+            *history,
+            {"role": "user", "content": user_content},
+        ]
+        tools = [_api_tool_def(api) for api in agent_apis]
+        apis_by_tool_name = {_api_tool_def(api)["function"]["name"]: api for api in agent_apis}
+        headers = {"Authorization": f"Bearer {self._openai_key()}"}
+        base = self._settings.openai_base_url.rstrip("/")
+
+        # Tope de vueltas ida-y-vuelta con herramientas: un modelo que
+        # insiste en llamar herramientas sin nunca responder no puede
+        # dejar la conversacion colgada.
+        for _ in range(3):
+            payload = {
+                "model": self._settings.openai_model,
+                "messages": messages,
+                "temperature": 0.4,
+                "max_tokens": 900,
+                "tools": tools,
+                "stream": False,
+            }
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{base}/chat/completions", json=payload, headers=headers
+                    )
+            except httpx.HTTPError as error:
+                raise ProviderError("No se pudo contactar con GPT.") from error
+            if response.status_code >= 400:
+                raise ProviderError(self._explain_gpt(response.status_code))
+
+            choice = response.json()["choices"][0]
+            assistant_message = choice["message"]
+            tool_calls = assistant_message.get("tool_calls") or []
+
+            if not tool_calls:
+                answer = str(assistant_message.get("content") or "").strip()
+                if not answer:
+                    async for event in self._say(
+                        conversation, message, "GPT no devolvio contenido.", "system"
+                    ):
+                        yield event
+                    return
+                yield ChatEvent("token", {"text": answer})
+                await self._persist(conversation, message, answer, "gpt")
+                yield ChatEvent(
+                    "done",
+                    {
+                        "answer": answer, "source": "gpt", "sources": sources,
+                        "conversation_id": conversation,
+                    },
+                )
+                return
+
+            messages.append(assistant_message)
+            for call in tool_calls:
+                name = call.get("function", {}).get("name", "")
+                api = apis_by_tool_name.get(name)
+                try:
+                    args = json.loads(call.get("function", {}).get("arguments") or "{}")
+                except ValueError:
+                    args = {}
+                if api is None:
+                    result_text = "Error: esa herramienta no existe."
+                else:
+                    result_text = await agent_apis_module.call(api, str(args.get("query", "")))
+                messages.append(
+                    {"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text}
+                )
+
+        async for event in self._say(
+            conversation, message, "No pude completar la consulta a tiempo.", "system"
+        ):
+            yield event
 
     @staticmethod
     def _explain_gpt(status: int) -> str:

@@ -137,3 +137,35 @@ CREATE TABLE IF NOT EXISTS price_watches (
     created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_price_watches_enabled ON price_watches(enabled);
+
+-- Archivos que un agente conoce de memoria (menu, catalogo, lista de
+-- precios). El texto ya viene extraido al subir el archivo (ver
+-- core/file_extract.py) -se agrega siempre al prompt del agente, como
+-- contexto fijo, no como busqueda dentro del documento.
+CREATE TABLE IF NOT EXISTS telegram_agent_files (
+    id          TEXT PRIMARY KEY,
+    agent_id    TEXT NOT NULL REFERENCES telegram_agents(id) ON DELETE CASCADE,
+    filename    TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    char_count  INTEGER NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_agent_files_agent ON telegram_agent_files(agent_id);
+
+-- APIs externas que un agente puede invocar en vivo durante la
+-- conversacion (ej. consultar stock real). El modelo decide cuando
+-- llamarla via tool calling de OpenAI -las credenciales (headers) las
+-- pone el admin al configurarla, nunca el usuario de Telegram.
+CREATE TABLE IF NOT EXISTS telegram_agent_apis (
+    id           TEXT PRIMARY KEY,
+    agent_id     TEXT NOT NULL REFERENCES telegram_agents(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    method       TEXT NOT NULL DEFAULT 'GET',
+    headers      TEXT NOT NULL DEFAULT '{}',
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_agent_apis_agent ON telegram_agent_apis(agent_id);

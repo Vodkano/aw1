@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from aw1.core.errors import ValidationError
+from aw1.core.errors import NotFoundError, ValidationError
 from aw1.core.telegram_store import TelegramStore
 from aw1.settings import Settings
 from aw1.telegram.client import TelegramClient, _split_message
@@ -190,6 +190,69 @@ async def test_create_agent_does_not_require_a_public_base_url(repo, tmp_path):
         await store.create_token(agent["id"], "123:ABC")
 
 
+# --- TelegramStore: archivos y APIs de un agente --------------------------------
+async def test_add_file_extracts_text_and_lists_it_under_the_agent(repo, telegram_settings):
+    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    agent = await store.create_agent(label="Bot", system_prompt="")
+
+    row = await store.add_file(agent["id"], "menu.txt", "Empanada de pino: $2000".encode())
+    assert row["content"] == "Empanada de pino: $2000"
+    assert row["char_count"] == len(row["content"])
+
+    files = store.list_files(agent["id"])
+    assert [f["filename"] for f in files] == ["menu.txt"]
+
+    assert await store.delete_file(row["id"]) is True
+    assert store.list_files(agent["id"]) == []
+
+
+async def test_add_file_rejects_an_unknown_agent(repo, telegram_settings):
+    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    with pytest.raises(NotFoundError):
+        await store.add_file("no-existe", "menu.txt", b"hola")
+
+
+async def test_create_api_normalizes_the_method_and_can_be_toggled(repo, telegram_settings):
+    # La validacion de la URL en si (rechazar redes privadas) es
+    # responsabilidad de core.netguard.normalize -ya cubierta en
+    # test_agent_apis.py- y create_api solo la reusa.
+    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    agent = await store.create_agent(label="Bot", system_prompt="")
+
+    api = await store.create_api(
+        agent["id"], name="stock", description="Consulta stock real",
+        url="https://api.example.com/stock", method="get", headers={"X-Key": "abc"},
+    )
+    assert api["method"] == "GET"
+    assert api["enabled"] is True
+    assert store.list_apis(agent["id"]) == [api]
+
+    disabled = await store.set_api_enabled(api["id"], False)
+    assert disabled["enabled"] is False
+
+    assert await store.delete_api(api["id"]) is True
+    assert store.list_apis(agent["id"]) == []
+
+
+async def test_get_cached_token_includes_files_and_only_enabled_apis(repo, telegram_settings):
+    store, token = await _make_token(repo, telegram_settings)
+    await store.add_file(token["agent_id"], "menu.txt", b"Empanada: $2000")
+    enabled_api = await store.create_api(
+        token["agent_id"], name="activa", description="d", url="https://api.example.com/a",
+        method="GET", headers={},
+    )
+    disabled_api = await store.create_api(
+        token["agent_id"], name="inactiva", description="d", url="https://api.example.com/b",
+        method="GET", headers={},
+    )
+    await store.set_api_enabled(disabled_api["id"], False)
+
+    cached = store.get_cached_token(token["id"])
+    assert cached is not None
+    assert [f["filename"] for f in cached["files"]] == ["menu.txt"]
+    assert [a["id"] for a in cached["apis"]] == [enabled_api["id"]]
+
+
 # --- TelegramOrchestrator: deteccion de URLs y seguimiento de precios ----------
 class FakeChatService:
     """Doble de ChatService: registra con que parametros se la llamo, sin
@@ -200,11 +263,12 @@ class FakeChatService:
         self.answer = answer
 
     async def stream(self, message, *, conversation_id=None, system_prompt=None, force_gpt=False,
-                      history_hours=None, fast_route=False):
+                      history_hours=None, fast_route=False, agent_apis=None):
         self.calls.append(
             {
                 "message": message, "system_prompt": system_prompt, "force_gpt": force_gpt,
                 "history_hours": history_hours, "fast_route": fast_route,
+                "agent_apis": agent_apis,
             }
         )
         from aw1.chat.events import ChatEvent

@@ -32,7 +32,13 @@ from ..core.secrets_store import SecretsStore
 from ..core.telegram_store import TelegramStore
 from ..db.postgres_repository import PostgresRepository
 from ..db.repository import Repository
-from ..llm.prompts import TELEGRAM_BASE_SYSTEM, TELEGRAM_CLOSE_SENTINEL, TELEGRAM_PERSONALITIES
+from ..llm.prompts import (
+    AGENT_FILES_NOTICE,
+    TELEGRAM_BASE_SYSTEM,
+    TELEGRAM_CLOSE_SENTINEL,
+    TELEGRAM_PERSONALITIES,
+    wrap_untrusted,
+)
 from ..pricing.models import Offer
 from ..pricing.pipeline import PricePipeline
 from ..settings import Settings
@@ -66,14 +72,28 @@ _NON_TEXT_REPLY = (
 _ERROR_REPLY = "Hubo un problema respondiendo. Intenta de nuevo."
 
 
+# Tope de caracteres del total de archivos que se agregan al prompt -no
+# hay busqueda dentro del documento (es contexto fijo, ver
+# core/file_extract.py), asi que un tope evita que un archivo grande infle
+# el costo de cada mensaje sin limite.
+MAX_AGENT_FILES_CHARS = 6000
+
+
 def _compose_system_prompt(token: dict[str, Any]) -> str:
     """Base comun + personalidad (sorteada al crear el agente) + el prompt
-    propio del agente, si tiene uno -se agrega sobre la base, nunca la
-    reemplaza (ver llm/prompts.py:TELEGRAM_BASE_SYSTEM)."""
+    propio del agente + los archivos que le subieron (menu, catalogo,
+    precios), si tiene -se agrega sobre la base, nunca la reemplaza (ver
+    llm/prompts.py:TELEGRAM_BASE_SYSTEM)."""
     parts = [TELEGRAM_BASE_SYSTEM, TELEGRAM_PERSONALITIES.get(token.get("personality") or "", "")]
     custom = str(token.get("system_prompt") or "").strip()
     if custom:
         parts.append(custom)
+
+    files = token.get("files") or []
+    if files:
+        combined = "\n\n".join(f"[{f['filename']}]\n{f['content']}" for f in files)
+        parts.append(wrap_untrusted(AGENT_FILES_NOTICE, combined[:MAX_AGENT_FILES_CHARS]))
+
     return "\n\n".join(part for part in parts if part.strip())
 
 
@@ -173,6 +193,7 @@ class TelegramOrchestrator:
                     async for event in self._chat.stream(
                         text, conversation_id=conversation_id, system_prompt=system_prompt,
                         force_gpt=True, history_hours=48.0, fast_route=True,
+                        agent_apis=token.get("apis") or None,
                     ):
                         if event.type == "done":
                             answer = str(event.data.get("answer", ""))

@@ -147,6 +147,26 @@ export interface TelegramTokenCreated extends TelegramTokenSummary {
   webhook_registered: boolean;
 }
 
+export interface TelegramAgentFileSummary {
+  id: string;
+  agent_id: string;
+  filename: string;
+  char_count: number;
+  created_at: string;
+}
+
+export interface TelegramAgentApiSummary {
+  id: string;
+  agent_id: string;
+  name: string;
+  description: string;
+  url: string;
+  method: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TelegramAgentSummary {
   id: string;
   label: string;
@@ -156,6 +176,8 @@ export interface TelegramAgentSummary {
   created_at: string;
   updated_at: string;
   tokens: TelegramTokenSummary[];
+  files: TelegramAgentFileSummary[];
+  apis: TelegramAgentApiSummary[];
 }
 
 export interface AdminStatus {

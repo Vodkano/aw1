@@ -15,6 +15,8 @@ import type {
   SavedItem,
   Status,
   StoreInfo,
+  TelegramAgentApiSummary,
+  TelegramAgentFileSummary,
   TelegramAgentSummary,
   TelegramTokenCreated,
 } from "../types";
@@ -101,7 +103,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  if (init.body) headers.set("Content-Type", "application/json");
+  // FormData (subida de archivos) necesita que el navegador ponga su propio
+  // Content-Type con el boundary -si se fuerza a JSON aca, el servidor no
+  // puede parsear el multipart.
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   const password = getAdminPassword();
   if (password) headers.set("X-Admin-Password", password);
 
@@ -303,5 +308,36 @@ export const admin = {
     adminRequest<{ system_prompt: string }>("/api/admin/telegram-agents/generate-prompt", {
       method: "POST",
       body: JSON.stringify({ description }),
+    }),
+
+  uploadTelegramAgentFile: (agentId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return adminRequest<TelegramAgentFileSummary>(`/api/admin/telegram-agents/${agentId}/files`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  deleteTelegramAgentFile: (agentId: string, fileId: string) =>
+    adminRequest<void>(`/api/admin/telegram-agents/${agentId}/files/${fileId}`, {
+      method: "DELETE",
+    }),
+
+  createTelegramAgentApi: (
+    agentId: string,
+    body: { name: string; description: string; url: string; method: string; headers: Record<string, string> },
+  ) =>
+    adminRequest<TelegramAgentApiSummary>(`/api/admin/telegram-agents/${agentId}/apis`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  setTelegramAgentApiEnabled: (agentId: string, apiId: string, enabled: boolean) =>
+    adminRequest<TelegramAgentApiSummary>(`/api/admin/telegram-agents/${agentId}/apis/${apiId}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
+  deleteTelegramAgentApi: (agentId: string, apiId: string) =>
+    adminRequest<void>(`/api/admin/telegram-agents/${agentId}/apis/${apiId}`, {
+      method: "DELETE",
     }),
 };

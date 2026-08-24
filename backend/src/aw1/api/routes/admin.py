@@ -11,7 +11,7 @@ desprotegida por un descuido al copiar/pegar.
 from __future__ import annotations
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 
 from ...core import llm_provider
 from ...core.errors import NotFoundError, ProviderError, ValidationError
@@ -22,14 +22,18 @@ from ..schemas import (
     ApiKeyCreated,
     ApiKeySummary,
     CreateApiKeyRequest,
+    CreateTelegramAgentApiRequest,
     CreateTelegramAgentRequest,
     CreateTelegramTokenRequest,
     GeneratedPromptResult,
     GeneratePromptRequest,
     SetSecretRequest,
+    TelegramAgentApiSummary,
+    TelegramAgentFileSummary,
     TelegramAgentSummary,
     TelegramTokenCreated,
     TestSecretResult,
+    UpdateTelegramAgentApiRequest,
     UpdateTelegramAgentRequest,
     UpdateTelegramTokenRequest,
 )
@@ -257,6 +261,67 @@ async def delete_telegram_token(
         raise NotFoundError("Ese bot no existe.")
     if not await box.telegram_store.delete_token(token_id):
         raise NotFoundError("Ese bot no existe.")
+
+
+# -- archivos que un agente conoce de memoria (menu, catalogo, precios) -----
+@router.post(
+    "/telegram-agents/{agent_id}/files", response_model=TelegramAgentFileSummary, status_code=201
+)
+async def upload_telegram_agent_file(
+    agent_id: str, file: UploadFile = File(...), box: Container = Depends(container)
+) -> TelegramAgentFileSummary:
+    content = await file.read()
+    row = await box.telegram_store.add_file(agent_id, file.filename or "archivo", content)
+    return TelegramAgentFileSummary(**row)
+
+
+@router.delete("/telegram-agents/{agent_id}/files/{file_id}", status_code=204)
+async def delete_telegram_agent_file(
+    agent_id: str, file_id: str, box: Container = Depends(container)
+) -> None:
+    if not any(item["id"] == file_id for item in box.telegram_store.list_files(agent_id)):
+        raise NotFoundError("Ese archivo no existe.")
+    if not await box.telegram_store.delete_file(file_id):
+        raise NotFoundError("Ese archivo no existe.")
+
+
+# -- APIs externas que un agente puede invocar en vivo -----------------------
+@router.post(
+    "/telegram-agents/{agent_id}/apis", response_model=TelegramAgentApiSummary, status_code=201
+)
+async def create_telegram_agent_api(
+    agent_id: str, payload: CreateTelegramAgentApiRequest, box: Container = Depends(container)
+) -> TelegramAgentApiSummary:
+    row = await box.telegram_store.create_api(
+        agent_id, name=payload.name, description=payload.description, url=payload.url,
+        method=payload.method, headers=payload.headers,
+    )
+    return TelegramAgentApiSummary(**row)
+
+
+@router.put(
+    "/telegram-agents/{agent_id}/apis/{api_id}", response_model=TelegramAgentApiSummary
+)
+async def update_telegram_agent_api(
+    agent_id: str, api_id: str, payload: UpdateTelegramAgentApiRequest,
+    box: Container = Depends(container),
+) -> TelegramAgentApiSummary:
+    if not any(item["id"] == api_id for item in box.telegram_store.list_apis(agent_id)):
+        raise NotFoundError("Esa API no existe.")
+    row = await box.telegram_store.set_api_enabled(api_id, payload.enabled)
+    if row is None:
+        raise NotFoundError("Esa API no existe.")
+    return TelegramAgentApiSummary(**row)
+
+
+@router.delete("/telegram-agents/{agent_id}/apis/{api_id}", status_code=204)
+async def delete_telegram_agent_api(
+    agent_id: str, api_id: str, box: Container = Depends(container)
+) -> None:
+    if not any(item["id"] == api_id for item in box.telegram_store.list_apis(agent_id)):
+        raise NotFoundError("Esa API no existe.")
+    if not await box.telegram_store.delete_api(api_id):
+        raise NotFoundError("Esa API no existe.")
 
 
 _PROMPT_WRITER_SYSTEM = """\

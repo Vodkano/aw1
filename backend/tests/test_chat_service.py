@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -394,3 +395,79 @@ async def test_search_items_escapes_sql_wildcards_in_keywords(repo):
 
     found = await repo.search_items(["rtx_4090"])
     assert [item["text"] for item in found] == ["Notebook con rtx_4090 en oferta"]
+
+
+# --- APIs de un agente (tool calling de OpenAI) --------------------------------
+class _FakeToolResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.status_code = 200
+        self._payload = payload
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+
+async def test_agent_apis_are_called_via_tool_calling_before_the_final_answer(repo, tmp_path):
+    """Con una API configurada para el agente, GPT puede pedir llamarla
+    (tool calling) antes de responder -sin streaming (ver
+    _answer_with_gpt_tools), pero el resultado final es el mismo contrato
+    de eventos que el camino normal."""
+    fake = FakeOllama(online=True)
+    judges = Judges(fake, model="mistral", timeout=5)
+    settings = Settings(_env_file=None, env="test", data_dir=tmp_path, openai_api_key="sk-test")
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    service = ChatService(
+        settings=settings, repository=repo, llm=fake, judges=judges,
+        wikipedia=Wikipedia(), secrets=secrets, tools=ToolRegistry([]),
+    )
+
+    api = {
+        "name": "consultar_stock", "description": "Consulta el stock real de un producto",
+        "url": "https://api.example.com/stock?sku={query}", "method": "GET", "headers": {},
+    }
+    tool_call_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_1", "type": "function",
+                    "function": {"name": "consultar_stock", "arguments": '{"query": "SKU123"}'},
+                }],
+            },
+        }],
+    })
+    final_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": "Hay 5 unidades disponibles."},
+        }],
+    })
+
+    post_mock = AsyncMock(side_effect=[tool_call_response, final_response])
+    call_mock = AsyncMock(return_value="5 unidades")
+    with (
+        patch("httpx.AsyncClient.post", new=post_mock),
+        patch("aw1.chat.service.agent_apis_module.call", new=call_mock),
+    ):
+        events = await _collect(
+            service.stream("hay stock del producto SKU123?", force_gpt=True, agent_apis=[api])
+        )
+
+    call_mock.assert_awaited_once()
+    assert call_mock.await_args.args[0] is api
+    assert call_mock.await_args.args[1] == "SKU123"
+    done = next(event for event in events if event.type == "done")
+    assert done.data["answer"] == "Hay 5 unidades disponibles."
+    assert done.data["source"] == "gpt"
+
+
+async def test_without_agent_apis_the_normal_streaming_path_is_used(repo, test_settings):
+    """agent_apis vacio/ausente no debe cambiar nada del camino normal
+    (streaming, sin tool calling) -confirma que el branch nuevo no se
+    activa sin querer."""
+    service, fake = await _build_service(repo, test_settings, None)
+    events = await _collect(service.stream("hola", agent_apis=[]))
+    done = next(event for event in events if event.type == "done")
+    assert done.data["source"] == "local"

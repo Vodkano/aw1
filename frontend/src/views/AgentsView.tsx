@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
+import type { ChangeEvent } from "react";
 import clsx from "clsx";
-import { ChevronDown, Sparkles, Trash2, Plus, X } from "lucide-react";
+import { ChevronDown, Sparkles, Trash2, Plus, X, Upload, Globe } from "lucide-react";
 import { admin, ApiError, getAdminPassword, setAdminPassword } from "../lib/api";
 import { PasswordGate } from "../components/PasswordGate";
-import type { TelegramAgentSummary, TelegramTokenSummary } from "../types";
+import type {
+  TelegramAgentApiSummary,
+  TelegramAgentFileSummary,
+  TelegramAgentSummary,
+  TelegramTokenSummary,
+} from "../types";
 
 const PERSONALITY_NAMES: Record<string, string> = {
   calida: "Camila",
@@ -117,6 +123,263 @@ function AddTokenForm({ agentId, onAdded }: { agentId: string; onAdded: () => vo
         </button>
       </div>
       {error && <p className="mt-1 text-[12px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function FilesSection({
+  agentId,
+  files,
+  onChanged,
+}: {
+  agentId: string;
+  files: TelegramAgentFileSummary[];
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const onFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    try {
+      await admin.uploadTelegramAgentFile(agentId, file);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo subir el archivo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (fileId: string, filename: string) => {
+    if (!window.confirm(`Quitar el archivo "${filename}"?`)) return;
+    setBusy(true);
+    try {
+      await admin.deleteTelegramAgentFile(agentId, fileId);
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="surface-soft rounded-[var(--radius-md)] p-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-medium uppercase tracking-wide muted">Archivos</p>
+        <label className={clsx("chip cursor-pointer hover:text-[var(--text)]", busy && "pointer-events-none opacity-50")}>
+          <Upload className="size-3" />
+          {busy ? "Subiendo..." : "Subir archivo"}
+          <input
+            type="file"
+            accept=".pdf,.xlsx,.xlsm,.csv,.txt"
+            className="hidden"
+            disabled={busy}
+            onChange={onFileSelected}
+          />
+        </label>
+      </div>
+      {files.length === 0 && (
+        <p className="mt-1 text-[12.5px] muted">Sin archivos (menu, catalogo, precios...).</p>
+      )}
+      {files.map((file) => (
+        <div key={file.id} className="flex items-center gap-2 py-1 text-[12.5px]">
+          <span className="truncate font-mono">{file.filename}</span>
+          <span className="muted shrink-0 text-[11px] tabular-nums">
+            {file.char_count.toLocaleString("es-CL")} caracteres
+          </span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => remove(file.id, file.filename)}
+            aria-label="Quitar archivo"
+            className="btn btn-ghost ml-auto size-6 shrink-0 p-0 hover:border-red-400 hover:text-red-500"
+          >
+            <Trash2 className="size-3" />
+          </button>
+        </div>
+      ))}
+      {error && <p className="mt-1 text-[12px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function ApiRow({
+  agentId,
+  api,
+  onChanged,
+}: {
+  agentId: string;
+  api: TelegramAgentApiSummary;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await admin.setTelegramAgentApiEnabled(agentId, api.id, !api.enabled);
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm(`Quitar la API "${api.name}"?`)) return;
+    setBusy(true);
+    try {
+      await admin.deleteTelegramAgentApi(agentId, api.id);
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="py-1.5 text-[12.5px]">
+      <div className="flex items-center gap-2">
+        <span className={clsx("size-1.5 shrink-0 rounded-full", api.enabled ? "bg-accent-500" : "bg-ink-400")} />
+        <span className="font-mono">{api.name}</span>
+        <span className="chip shrink-0">{api.method}</span>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={toggle}
+          className="chip ml-auto hover:text-[var(--text)]"
+        >
+          {api.enabled ? "Desactivar" : "Activar"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={remove}
+          aria-label="Quitar API"
+          className="btn btn-ghost size-6 p-0 hover:border-red-400 hover:text-red-500"
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </div>
+      <p className="mt-0.5 truncate pl-3.5 text-[11.5px] muted" title={api.url}>
+        {api.description}
+      </p>
+    </div>
+  );
+}
+
+function AddApiForm({ agentId, onAdded }: { agentId: string; onAdded: () => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [url, setUrl] = useState("");
+  const [method, setMethod] = useState("GET");
+  const [headersText, setHeadersText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const add = async () => {
+    if (!name.trim() || !description.trim() || !url.trim()) return;
+    let headers: Record<string, string> = {};
+    if (headersText.trim()) {
+      try {
+        headers = JSON.parse(headersText);
+      } catch {
+        setError('Los headers deben ser JSON valido, ej: {"Authorization": "Bearer ..."}');
+        return;
+      }
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await admin.createTelegramAgentApi(agentId, {
+        name: name.trim(), description: description.trim(), url: url.trim(), method, headers,
+      });
+      setName("");
+      setDescription("");
+      setUrl("");
+      setHeadersText("");
+      onAdded();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo agregar la API.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div className="flex gap-2">
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Nombre (ej: consultar_stock)"
+          className="input"
+        />
+        <select
+          value={method}
+          onChange={(event) => setMethod(event.target.value)}
+          className="input w-24 shrink-0"
+        >
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+        </select>
+      </div>
+      <input
+        value={description}
+        onChange={(event) => setDescription(event.target.value)}
+        placeholder="Que hace y cuando usarla (esto lo lee el modelo para decidir)"
+        className="input w-full"
+      />
+      <input
+        value={url}
+        onChange={(event) => setUrl(event.target.value)}
+        placeholder="https://tu-api.cl/stock?sku={query}"
+        className="input w-full font-mono"
+      />
+      <input
+        value={headersText}
+        onChange={(event) => setHeadersText(event.target.value)}
+        placeholder='Headers opcionales, JSON: {"Authorization": "Bearer ..."}'
+        className="input w-full font-mono"
+      />
+      <button
+        type="button"
+        disabled={busy || !name.trim() || !description.trim() || !url.trim()}
+        onClick={add}
+        className="btn btn-ghost px-3 py-1.5 text-[13px]"
+      >
+        <Plus className="size-3.5" />
+        Agregar API
+      </button>
+      {error && <p className="text-[12px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function ApisSection({
+  agentId,
+  apis,
+  onChanged,
+}: {
+  agentId: string;
+  apis: TelegramAgentApiSummary[];
+  onChanged: () => void;
+}) {
+  return (
+    <div className="surface-soft rounded-[var(--radius-md)] p-3">
+      <div className="flex items-center gap-1.5">
+        <Globe className="size-3 muted" />
+        <p className="text-[11px] font-medium uppercase tracking-wide muted">
+          APIs (el agente decide cuando llamarlas)
+        </p>
+      </div>
+      {apis.length === 0 && <p className="mt-1 text-[12.5px] muted">Ninguna API conectada.</p>}
+      {apis.map((api) => (
+        <ApiRow key={api.id} agentId={agentId} api={api} onChanged={onChanged} />
+      ))}
+      <AddApiForm agentId={agentId} onAdded={onChanged} />
     </div>
   );
 }
@@ -291,6 +554,9 @@ function AgentRow({
             ))}
             <AddTokenForm agentId={agent.id} onAdded={onChanged} />
           </div>
+
+          <FilesSection agentId={agent.id} files={agent.files} onChanged={onChanged} />
+          <ApisSection agentId={agent.id} apis={agent.apis} onChanged={onChanged} />
 
           {error && <p className="text-[12px] text-red-500">{error}</p>}
         </div>
