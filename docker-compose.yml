@@ -35,6 +35,9 @@ services:
       # de Telegram (panel admin -> Bots de Telegram). Sin esto, crear un
       # perfil falla explicito.
       AW1_PUBLIC_BASE_URL: ${AW1_PUBLIC_BASE_URL:-}
+      # Cada cuanto se revisan (segundos) los seguimientos de precio activos
+      # de todos los bots de Telegram. Default 6h.
+      AW1_PRICE_WATCH_INTERVAL_SECONDS: ${AW1_PRICE_WATCH_INTERVAL_SECONDS:-21600}
       DATABASE_URL: ${DATABASE_URL:-postgresql://aw1:aw1@postgres:5432/aw1}
     volumes:
       - aw1-data:/data
