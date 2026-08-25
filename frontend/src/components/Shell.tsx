@@ -10,21 +10,31 @@ import {
   Moon,
   Sun,
   Circle,
+  FlaskConical,
 } from "lucide-react";
 import type { Status } from "../types";
 import { useTheme } from "../lib/useTheme";
 
-export type ViewKey = "chat" | "prices" | "memory" | "settings" | "admin" | "agents";
+export type ViewKey =
+  | "chat"
+  | "prices"
+  | "memory"
+  | "settings"
+  | "admin"
+  | "agents"
+  | "autoextension";
 
-// "admin" y "agents" siguen exigiendo su propia password (X-Admin-Password)
-// aparte del token general -el boton solo ahorra tener que escribir la URL
-// (#admin / #agents) a mano, no baja la seguridad.
+// "admin"/"agents"/"autoextension" siguen exigiendo su propia password
+// (X-Admin-Password) aparte del token general -el boton solo ahorra tener
+// que escribir la URL (#admin / #agents / #autoextension) a mano, no baja
+// la seguridad.
 const NAV: { key: ViewKey; label: string; icon: typeof MessageSquare }[] = [
   { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "prices", label: "Precios", icon: Tags },
   { key: "memory", label: "Guardado", icon: Bookmark },
   { key: "settings", label: "Ajustes", icon: SlidersHorizontal },
   { key: "agents", label: "Agentes", icon: Bot },
+  { key: "autoextension", label: "Auto-extension", icon: FlaskConical },
   { key: "admin", label: "Admin", icon: Settings2 },
 ];
 

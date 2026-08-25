@@ -601,6 +601,170 @@ async def test_an_empty_reply_after_generating_an_image_still_gets_a_sensible_an
     assert "no devolvio contenido" not in done.data["answer"].lower()
 
 
+# --- solicitar_nueva_capacidad: el modelo pide algo que no tiene --------------
+async def test_capability_gap_tool_call_is_logged_and_replies_honestly(repo, tmp_path):
+    """El pedido: el modelo puede decidir que le falta una capacidad y
+    anotarlo, en vez de inventar que la tiene. El gate de tool-calling se
+    tiene que abrir con SOLO allow_capability_requests=True -sin ninguna
+    API configurada ni generacion de imagenes habilitada (regression test
+    del fix real en el gate de chat/service.py)."""
+    fake = FakeOllama(online=True)
+    judges = Judges(fake, model="mistral", timeout=5)
+    settings = Settings(_env_file=None, env="test", data_dir=tmp_path, openai_api_key="sk-test")
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    service = ChatService(
+        settings=settings, repository=repo, llm=fake, judges=judges,
+        wikipedia=Wikipedia(), secrets=secrets, tools=ToolRegistry([]),
+    )
+
+    tool_call_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_1", "type": "function",
+                    "function": {
+                        "name": "solicitar_nueva_capacidad",
+                        "arguments": (
+                            '{"name": "consultar_dolar_hoy", '
+                            '"description": "Consultar el valor del dolar", '
+                            '"why": "El cliente pregunto por el dolar"}'
+                        ),
+                    },
+                }],
+            },
+        }],
+    })
+    final_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": "No tengo ese dato todavia, quedo anotado."},
+        }],
+    })
+    post_mock = AsyncMock(side_effect=[tool_call_response, final_response])
+    save_reasoning_mock = AsyncMock(wraps=repo.save_reasoning)
+
+    with (
+        patch("httpx.AsyncClient.post", new=post_mock),
+        patch.object(repo, "save_reasoning", save_reasoning_mock),
+    ):
+        events = await _collect(
+            service.stream(
+                "cual es el dolar hoy?", force_gpt=True, agent_id="agent-1",
+                allow_capability_requests=True,
+            )
+        )
+
+    # save_reasoning tambien se llama para "chat_route" (ya existia, no es
+    # parte de este pedido) -se filtra por kind para aislar el registro
+    # nuevo del hueco de capacidad.
+    gap_calls = [call for call in save_reasoning_mock.await_args_list if call.args[1] == "capability_gap"]
+    assert len(gap_calls) == 1
+    payload = gap_calls[0].args[3]
+    assert payload["agent_id"] == "agent-1"
+    assert payload["name"] == "consultar_dolar_hoy"
+    done = next(event for event in events if event.type == "done")
+    assert "anotado" in done.data["answer"].lower()
+
+
+async def test_a_capability_gap_logging_failure_does_not_crash_the_chat(repo, tmp_path):
+    fake = FakeOllama(online=True)
+    judges = Judges(fake, model="mistral", timeout=5)
+    settings = Settings(_env_file=None, env="test", data_dir=tmp_path, openai_api_key="sk-test")
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    service = ChatService(
+        settings=settings, repository=repo, llm=fake, judges=judges,
+        wikipedia=Wikipedia(), secrets=secrets, tools=ToolRegistry([]),
+    )
+    tool_call_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_1", "type": "function",
+                    "function": {
+                        "name": "solicitar_nueva_capacidad",
+                        "arguments": '{"name": "x", "description": "x", "why": "x"}',
+                    },
+                }],
+            },
+        }],
+    })
+    final_response = _FakeToolResponse({
+        "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "listo"}}],
+    })
+    post_mock = AsyncMock(side_effect=[tool_call_response, final_response])
+    real_save_reasoning = repo.save_reasoning
+
+    async def flaky_save_reasoning(conversation_id, kind, source_input, payload):
+        if kind == "capability_gap":
+            raise RuntimeError("db caida")
+        return await real_save_reasoning(conversation_id, kind, source_input, payload)
+
+    with (
+        patch("httpx.AsyncClient.post", new=post_mock),
+        patch.object(repo, "save_reasoning", side_effect=flaky_save_reasoning),
+    ):
+        events = await _collect(
+            service.stream("necesito algo raro", force_gpt=True, allow_capability_requests=True)
+        )
+    assert any(event.type == "done" for event in events)
+
+
+# --- herramientas generadas (ya aprobadas) se ofrecen y corren en sandbox -----
+async def test_an_active_generated_tool_is_offered_and_run_in_the_sandbox(repo, tmp_path):
+    fake = FakeOllama(online=True)
+    judges = Judges(fake, model="mistral", timeout=5)
+    settings = Settings(_env_file=None, env="test", data_dir=tmp_path, openai_api_key="sk-test")
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    service = ChatService(
+        settings=settings, repository=repo, llm=fake, judges=judges,
+        wikipedia=Wikipedia(), secrets=secrets, tools=ToolRegistry([]),
+    )
+    tool_row = {
+        "id": "tool-1", "name": "consultar_dolar_hoy", "description": "Consulta el dolar",
+        "status": "ACTIVE",
+        "spec": {"parameters": {"type": "object", "properties": {}, "required": []}},
+        "code": "def run(input: dict) -> dict:\n    return {'valor_clp': 950}\n",
+    }
+    tool_call_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_1", "type": "function",
+                    "function": {"name": "consultar_dolar_hoy", "arguments": "{}"},
+                }],
+            },
+        }],
+    })
+    final_response = _FakeToolResponse({
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": "El dolar esta en 950."},
+        }],
+    })
+    post_mock = AsyncMock(side_effect=[tool_call_response, final_response])
+    record_call_mock = AsyncMock()
+    with (
+        patch("httpx.AsyncClient.post", new=post_mock),
+        patch.object(repo, "record_generated_tool_call", record_call_mock),
+    ):
+        events = await _collect(
+            service.stream("cual es el dolar hoy?", force_gpt=True, generated_tools=[tool_row])
+        )
+
+    record_call_mock.assert_awaited_once_with("tool-1", ok=True, error="")
+    done = next(event for event in events if event.type == "done")
+    assert done.data["answer"] == "El dolar esta en 950."
+
+
 async def test_without_agent_apis_the_normal_streaming_path_is_used(repo, test_settings):
     """agent_apis vacio/ausente no debe cambiar nada del camino normal
     (streaming, sin tool calling) -confirma que el branch nuevo no se

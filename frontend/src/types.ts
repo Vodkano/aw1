@@ -181,6 +181,48 @@ export interface TelegramAgentSummary {
   apis: TelegramAgentApiSummary[];
 }
 
+export interface CapabilityGapSummary {
+  id: number;
+  conversation_id: string | null;
+  agent_id: string | null;
+  name: string;
+  description: string;
+  why: string;
+  triggering_message: string;
+  created_at: string;
+  tool_id: string | null;
+  tool_status: string | null;
+}
+
+export type GeneratedToolStatus =
+  | "PROPOSED"
+  | "GENERATING"
+  | "PENDING_APPROVAL"
+  | "ACTIVE"
+  | "REJECTED";
+
+export interface GeneratedToolSummary {
+  id: string;
+  agent_id: string;
+  source_gap_reasoning_id: number | null;
+  name: string;
+  description: string;
+  status: GeneratedToolStatus;
+  call_count: number;
+  last_called_at: string | null;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneratedToolDetail extends GeneratedToolSummary {
+  spec: Record<string, unknown>;
+  code: string;
+  test_code: string;
+  sandbox_result: Record<string, unknown>;
+  reject_reason: string;
+}
+
 export interface AdminStatus {
   llm_provider: string;
   llm_model: string;

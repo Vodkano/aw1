@@ -195,13 +195,18 @@ class TelegramOrchestrator:
                     # responde. allow_image_generation: el modelo puede
                     # generar y mandar una imagen (DALL-E) cuando la piden
                     # -sin costo de streaming perdido, Telegram igual recibe
-                    # la respuesta entera de una vez.
+                    # la respuesta entera de una vez. allow_capability_requests
+                    # + generated_tools: el modelo puede anotar que le falta
+                    # una capacidad, y usar las que ya se generaron y un
+                    # humano aprobo desde el panel (ver core/sandbox.py).
                     async for event in self._chat.stream(
                         text, conversation_id=conversation_id, system_prompt=system_prompt,
                         force_gpt=True, history_hours=self._settings.telegram_history_hours,
                         history_max_messages=self._settings.telegram_history_max_messages,
                         fast_route=True, agent_apis=token.get("apis") or None,
-                        allow_image_generation=True,
+                        allow_image_generation=True, agent_id=token["agent_id"],
+                        allow_capability_requests=True,
+                        generated_tools=token.get("generated_tools") or None,
                     ):
                         if event.type == "done":
                             answer = str(event.data.get("answer", ""))

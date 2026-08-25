@@ -25,10 +25,11 @@ from typing import Any, Protocol
 from ..llm.prompts import TELEGRAM_PERSONALITIES
 from ..settings import Settings
 from ..telegram.client import TelegramClient
-from . import netguard
+from . import code_agent, llm_provider, netguard, sandbox, tool_designer
 from .api_keys_store import hash_key
 from .errors import NotFoundError, ValidationError
 from .file_extract import extract_text
+from .secrets_store import SecretsStore
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +73,39 @@ class _TelegramRepo(Protocol):
     ) -> dict[str, Any] | None: ...
     async def delete_telegram_agent_api(self, api_id: str) -> bool: ...
 
+    async def create_generated_tool(
+        self, tool_id: str, agent_id: str, name: str, description: str,
+        source_gap_reasoning_id: int | None,
+    ) -> dict[str, Any]: ...
+    async def list_generated_tools(self, agent_id: str | None = None) -> list[dict[str, Any]]: ...
+    async def get_generated_tool(self, tool_id: str) -> dict[str, Any] | None: ...
+    async def set_generated_tool_generated(
+        self, tool_id: str, spec_json: str, code: str, test_code: str
+    ) -> dict[str, Any] | None: ...
+    async def set_generated_tool_tested(
+        self, tool_id: str, sandbox_result_json: str, *, passed: bool, reject_reason: str = ""
+    ) -> dict[str, Any] | None: ...
+    async def set_generated_tool_status(
+        self, tool_id: str, status: str, reject_reason: str = ""
+    ) -> dict[str, Any] | None: ...
+    async def delete_generated_tool(self, tool_id: str) -> bool: ...
+    async def list_reasoning_by_kind(self, kind: str, limit: int = 200) -> list[dict[str, Any]]: ...
+    async def get_reasoning(self, reasoning_id: int) -> dict[str, Any] | None: ...
+
 
 class TelegramStore:
-    def __init__(self, repo: Any, telegram: TelegramClient, settings: Settings) -> None:
+    def __init__(
+        self, repo: Any, telegram: TelegramClient, settings: Settings, secrets: SecretsStore
+    ) -> None:
         self._repo: _TelegramRepo = repo
         self._telegram = telegram
         self._settings = settings
+        self._secrets = secrets
         self._agents: dict[str, dict[str, Any]] = {}
         self._tokens: dict[str, dict[str, Any]] = {}
         self._files: dict[str, dict[str, Any]] = {}
         self._apis: dict[str, dict[str, Any]] = {}
+        self._generated_tools: dict[str, dict[str, Any]] = {}
 
     async def load(self) -> None:
         agents = await self._repo.list_telegram_agents()
@@ -90,11 +114,14 @@ class TelegramStore:
         self._tokens = {row["id"]: row for row in tokens}
         self._files = {}
         self._apis = {}
+        self._generated_tools = {}
         for agent_id in self._agents:
             for row in await self._repo.list_telegram_agent_files(agent_id):
                 self._files[row["id"]] = row
             for row in await self._repo.list_telegram_agent_apis(agent_id):
                 self._apis[row["id"]] = row
+            for row in await self._repo.list_generated_tools(agent_id):
+                self._generated_tools[row["id"]] = row
 
     # ------------------------------------------------------------------
     # Camino caliente del webhook
@@ -116,6 +143,13 @@ class TelegramStore:
             "personality": agent["personality"],
             "files": self.list_files(agent["id"]),
             "apis": [api for api in self.list_apis(agent["id"]) if api.get("enabled", True)],
+            # Solo las aprobadas por un humano llegan a un chat real -ver
+            # approve_generated_tool. Nunca ninguna otra, sin importar en
+            # que estado quede.
+            "generated_tools": [
+                tool for tool in self.list_generated_tools(agent["id"])
+                if tool.get("status") == "ACTIVE"
+            ],
         }
 
     # ------------------------------------------------------------------
@@ -308,6 +342,173 @@ class TelegramStore:
         ok = await self._repo.delete_telegram_agent_api(api_id)
         if ok:
             self._apis.pop(api_id, None)
+        return ok
+
+    # ------------------------------------------------------------------
+    # Herramientas generadas por IA a partir de un hueco detectado
+    # (chat/service.py: solicitar_nueva_capacidad -> aca).
+    #
+    # PROPOSED -> (admin pide generar) -> GENERATING -> (admin prueba) ->
+    # PENDING_APPROVAL o REJECTED -> (admin aprueba/rechaza) -> ACTIVE o
+    # REJECTED. Cada paso lo dispara un humano desde el panel -detectar el
+    # hueco nunca arranca esto solo, y nada llega a ACTIVE sin que alguien
+    # lo apruebe a mano.
+    # ------------------------------------------------------------------
+    def list_generated_tools(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        rows = list(self._generated_tools.values())
+        if agent_id is not None:
+            rows = [row for row in rows if row["agent_id"] == agent_id]
+        return sorted(rows, key=lambda row: row["created_at"], reverse=True)
+
+    def get_generated_tool(self, tool_id: str) -> dict[str, Any] | None:
+        return self._generated_tools.get(tool_id)
+
+    async def list_capability_gaps(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Pedidos de capacidad detectados, cruzados con la herramienta ya
+        creada a partir de cada uno (si existe) -para que el panel sepa si
+        un pedido ya tiene algo en camino o sigue suelto."""
+        rows = await self._repo.list_reasoning_by_kind("capability_gap", limit)
+        tools_by_gap = {
+            tool["source_gap_reasoning_id"]: tool
+            for tool in self._generated_tools.values()
+            if tool.get("source_gap_reasoning_id") is not None
+        }
+        gaps: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row["payload"] if isinstance(row["payload"], dict) else {}
+            tool = tools_by_gap.get(row["id"])
+            gaps.append({
+                "id": row["id"], "conversation_id": row["conversation_id"],
+                "agent_id": payload.get("agent_id"), "name": payload.get("name", ""),
+                "description": payload.get("description", ""), "why": payload.get("why", ""),
+                "triggering_message": payload.get("triggering_message", ""),
+                "created_at": row["created_at"],
+                "tool_id": tool["id"] if tool else None,
+                "tool_status": tool["status"] if tool else None,
+            })
+        return gaps
+
+    async def create_generated_tool(
+        self, agent_id: str, *, name: str, description: str,
+        source_gap_reasoning_id: int | None = None,
+    ) -> dict[str, Any]:
+        if agent_id not in self._agents:
+            raise NotFoundError("Ese agente no existe.")
+        tool_id = uuid.uuid4().hex
+        row = await self._repo.create_generated_tool(
+            tool_id, agent_id, name.strip() or "herramienta", description.strip(),
+            source_gap_reasoning_id,
+        )
+        self._generated_tools[tool_id] = row
+        return row
+
+    async def generate_tool_code(self, tool_id: str) -> dict[str, Any]:
+        """PROPOSED -> GENERATING: le pide a GPT una especificacion (Tool
+        Designer) y despues el codigo (Code Agent). Si el pedido vino de
+        un hueco real detectado en una conversacion, usa ese texto -mas
+        informacion que el resumen corto guardado en la fila."""
+        row = self._generated_tools.get(tool_id)
+        if row is None:
+            raise NotFoundError("Esa herramienta no existe.")
+        if row["status"] != "PROPOSED":
+            raise ValidationError("Esta herramienta ya tiene codigo generado.")
+
+        key = llm_provider.openai_key(self._settings, self._secrets)
+        if not key.strip():
+            raise ValidationError("GPT no esta configurado; agrega una clave de OpenAI primero.")
+
+        gap = {
+            "name": row["name"], "description": row["description"],
+            "why": "", "triggering_message": "",
+        }
+        if row.get("source_gap_reasoning_id"):
+            reasoning = await self._repo.get_reasoning(row["source_gap_reasoning_id"])
+            if reasoning and isinstance(reasoning.get("payload"), dict):
+                gap.update(reasoning["payload"])
+
+        base_url = self._settings.openai_base_url
+        model = self._settings.openai_model
+        spec = await tool_designer.design_spec(gap, api_key=key, base_url=base_url, model=model)
+        code, test_code = await code_agent.generate_code(
+            spec, api_key=key, base_url=base_url, model=model
+        )
+
+        updated = await self._repo.set_generated_tool_generated(
+            tool_id, json.dumps(spec, ensure_ascii=False), code, test_code,
+        )
+        if updated is None:
+            raise NotFoundError("Esa herramienta no existe.")
+        self._generated_tools[tool_id] = updated
+        return updated
+
+    async def test_generated_tool(self, tool_id: str) -> dict[str, Any]:
+        """GENERATING -> PENDING_APPROVAL o REJECTED: corre el codigo de
+        verdad, aislado (ver core/sandbox.py), con el primer ejemplo de
+        entrada que trae la especificacion."""
+        row = self._generated_tools.get(tool_id)
+        if row is None:
+            raise NotFoundError("Esa herramienta no existe.")
+        if row["status"] != "GENERATING":
+            raise ValidationError(
+                "Esta herramienta todavia no tiene codigo generado, o ya se probo."
+            )
+        examples = (row.get("spec") or {}).get("example_inputs") or [{}]
+        example_input = examples[0] if examples and isinstance(examples[0], dict) else {}
+
+        result = await sandbox.run_in_sandbox(
+            row["code"], example_input,
+            timeout_seconds=self._settings.sandbox_timeout_seconds,
+            cpu_seconds=self._settings.sandbox_cpu_seconds,
+            memory_mb=self._settings.sandbox_memory_mb,
+        )
+        result_payload = {
+            "ok": result.ok, "output": result.output, "stdout": result.stdout,
+            "stderr": result.stderr, "error": result.error,
+            "duration_seconds": result.duration_seconds,
+        }
+        updated = await self._repo.set_generated_tool_tested(
+            tool_id, json.dumps(result_payload, ensure_ascii=False, default=str),
+            passed=result.ok, reject_reason="" if result.ok else result.error,
+        )
+        if updated is None:
+            raise NotFoundError("Esa herramienta no existe.")
+        self._generated_tools[tool_id] = updated
+        return updated
+
+    async def approve_generated_tool(self, tool_id: str) -> dict[str, Any]:
+        """PENDING_APPROVAL -> ACTIVE. El unico camino a ACTIVE -nunca
+        automatico, sin importar que tan bien haya salido la prueba."""
+        row = self._generated_tools.get(tool_id)
+        if row is None:
+            raise NotFoundError("Esa herramienta no existe.")
+        if row["status"] != "PENDING_APPROVAL":
+            raise ValidationError(
+                "Solo se puede aprobar una herramienta que ya paso la prueba de sandbox."
+            )
+        updated = await self._repo.set_generated_tool_status(tool_id, "ACTIVE")
+        if updated is None:
+            raise NotFoundError("Esa herramienta no existe.")
+        self._generated_tools[tool_id] = updated
+        return updated
+
+    async def reject_generated_tool(self, tool_id: str, reason: str = "") -> dict[str, Any]:
+        row = self._generated_tools.get(tool_id)
+        if row is None:
+            raise NotFoundError("Esa herramienta no existe.")
+        if row["status"] == "ACTIVE":
+            raise ValidationError(
+                "Esta herramienta ya esta activa -si ya no la queres, borrala en vez de rechazarla."
+            )
+        updated = await self._repo.set_generated_tool_status(tool_id, "REJECTED", reason.strip())
+        if updated is None:
+            raise NotFoundError("Esa herramienta no existe.")
+        self._generated_tools[tool_id] = updated
+        return updated
+
+    async def delete_generated_tool(self, tool_id: str) -> bool:
+        ok = await self._repo.delete_generated_tool(tool_id)
+        if ok:
+            self._generated_tools.pop(tool_id, None)
         return ok
 
 

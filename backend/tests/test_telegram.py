@@ -122,13 +122,21 @@ def telegram_settings(tmp_path) -> Settings:
     )
 
 
+async def _make_store(repo, settings) -> TelegramStore:
+    from aw1.core.secrets_store import SecretsStore
+
+    secrets = SecretsStore(repo)
+    await secrets.load()
+    return TelegramStore(repo, FakeTelegramClient(), settings, secrets)
+
+
 async def _make_token(
     repo, telegram_settings, *, system_prompt: str = "", bot_token: str = "123:ABC"
 ) -> tuple[TelegramStore, dict[str, Any]]:
     """Crea un agente y un token, y devuelve el token YA UNIDO con los
     campos del agente -la misma forma que usa el camino caliente del
     webhook (TelegramStore.get_cached_token)."""
-    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    store = await _make_store(repo, telegram_settings)
     agent = await store.create_agent(label="Bot", system_prompt=system_prompt)
     created = await store.create_token(agent["id"], bot_token)
     token = store.get_cached_token(created["id"])
@@ -170,7 +178,7 @@ async def test_create_token_rejects_one_already_used_by_another_agent(repo, tele
 
 
 async def test_create_token_rejects_one_telegram_does_not_recognize(repo, telegram_settings):
-    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    store = await _make_store(repo, telegram_settings)
     agent = await store.create_agent(label="Bot", system_prompt="")
     with pytest.raises(ValidationError, match="rechazo el token"):
         await store.create_token(agent["id"], "bad-token")
@@ -189,7 +197,7 @@ async def test_create_agent_does_not_require_a_public_base_url(repo, tmp_path):
     """El agente (el prompt/personalidad) no necesita webhook; solo agregarle
     un token si lo necesita -recien ahi hace falta AW1_PUBLIC_BASE_URL."""
     settings = Settings(_env_file=None, env="test", data_dir=tmp_path)
-    store = TelegramStore(repo, FakeTelegramClient(), settings)
+    store = await _make_store(repo, settings)
     agent = await store.create_agent(label="Bot", system_prompt="")
     assert agent["id"]
 
@@ -199,7 +207,7 @@ async def test_create_agent_does_not_require_a_public_base_url(repo, tmp_path):
 
 # --- TelegramStore: archivos y APIs de un agente --------------------------------
 async def test_add_file_extracts_text_and_lists_it_under_the_agent(repo, telegram_settings):
-    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    store = await _make_store(repo, telegram_settings)
     agent = await store.create_agent(label="Bot", system_prompt="")
 
     row = await store.add_file(agent["id"], "menu.txt", "Empanada de pino: $2000".encode())
@@ -214,7 +222,7 @@ async def test_add_file_extracts_text_and_lists_it_under_the_agent(repo, telegra
 
 
 async def test_add_file_rejects_an_unknown_agent(repo, telegram_settings):
-    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    store = await _make_store(repo, telegram_settings)
     with pytest.raises(NotFoundError):
         await store.add_file("no-existe", "menu.txt", b"hola")
 
@@ -223,7 +231,7 @@ async def test_create_api_normalizes_the_method_and_can_be_toggled(repo, telegra
     # La validacion de la URL en si (rechazar redes privadas) es
     # responsabilidad de core.netguard.normalize -ya cubierta en
     # test_agent_apis.py- y create_api solo la reusa.
-    store = TelegramStore(repo, FakeTelegramClient(), telegram_settings)
+    store = await _make_store(repo, telegram_settings)
     agent = await store.create_agent(label="Bot", system_prompt="")
 
     api = await store.create_api(
@@ -258,6 +266,8 @@ async def test_get_cached_token_includes_files_and_only_enabled_apis(repo, teleg
     assert cached is not None
     assert [f["filename"] for f in cached["files"]] == ["menu.txt"]
     assert [a["id"] for a in cached["apis"]] == [enabled_api["id"]]
+    # Sin ninguna herramienta generada aprobada todavia -lista vacia, no falta.
+    assert cached["generated_tools"] == []
 
 
 # --- TelegramOrchestrator: deteccion de URLs y seguimiento de precios ----------
@@ -272,13 +282,16 @@ class FakeChatService:
 
     async def stream(self, message, *, conversation_id=None, system_prompt=None, force_gpt=False,
                       history_hours=None, history_max_messages=60, fast_route=False, agent_apis=None,
-                      allow_image_generation=False):
+                      allow_image_generation=False, agent_id=None, allow_capability_requests=False,
+                      generated_tools=None):
         self.calls.append(
             {
                 "message": message, "system_prompt": system_prompt, "force_gpt": force_gpt,
                 "history_hours": history_hours, "history_max_messages": history_max_messages,
                 "fast_route": fast_route, "agent_apis": agent_apis,
-                "allow_image_generation": allow_image_generation,
+                "allow_image_generation": allow_image_generation, "agent_id": agent_id,
+                "allow_capability_requests": allow_capability_requests,
+                "generated_tools": generated_tools,
             }
         )
         from aw1.chat.events import ChatEvent
@@ -365,6 +378,8 @@ async def test_a_message_without_urls_goes_through_the_normal_chat_path(repo, te
     assert call["history_max_messages"] == 120
     assert call["fast_route"] is True
     assert call["allow_image_generation"] is True
+    assert call["agent_id"] == token["agent_id"]
+    assert call["allow_capability_requests"] is True
     # El prompt final es base + personalidad + lo propio del agente, no solo
     # lo que escribio el admin.
     assert "Vende zapatillas." in call["system_prompt"]

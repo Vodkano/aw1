@@ -169,3 +169,32 @@ CREATE TABLE IF NOT EXISTS telegram_agent_apis (
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_telegram_agent_apis_agent ON telegram_agent_apis(agent_id);
+
+-- Herramientas escritas por IA a partir de un hueco detectado en una
+-- conversacion (ver chat/service.py, tool solicitar_nueva_capacidad).
+-- status recorre PROPOSED -> GENERATING -> PENDING_APPROVAL -> ACTIVE o
+-- REJECTED; se valida en Python (core/telegram_store.py), no con un CHECK,
+-- para que este archivo y schema_postgres.sql queden identicos. Solo las
+-- ACTIVE se ofrecen al modelo (ver TelegramStore.get_cached_token) y solo
+-- llegan ahi con aprobacion humana explicita desde el panel admin -nunca
+-- automatico.
+CREATE TABLE IF NOT EXISTS generated_tools (
+    id                      TEXT PRIMARY KEY,
+    agent_id                TEXT NOT NULL REFERENCES telegram_agents(id) ON DELETE CASCADE,
+    source_gap_reasoning_id INTEGER REFERENCES reasoning(id) ON DELETE SET NULL,
+    name                    TEXT NOT NULL,
+    description             TEXT NOT NULL,
+    status                  TEXT NOT NULL DEFAULT 'PROPOSED',
+    spec                    TEXT NOT NULL DEFAULT '{}',
+    code                    TEXT NOT NULL DEFAULT '',
+    test_code               TEXT NOT NULL DEFAULT '',
+    sandbox_result          TEXT NOT NULL DEFAULT '{}',
+    reject_reason           TEXT NOT NULL DEFAULT '',
+    call_count              INTEGER NOT NULL DEFAULT 0,
+    last_called_at          TEXT,
+    last_error              TEXT NOT NULL DEFAULT '',
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_generated_tools_agent ON generated_tools(agent_id);
+CREATE INDEX IF NOT EXISTS idx_generated_tools_status ON generated_tools(status);

@@ -161,6 +161,15 @@ class Settings(BaseSettings):
     # tienda bloquee la IP de la VPS (ya paso con Falabella/Ripley).
     price_watch_interval_seconds: float = Field(default=21600.0, gt=60)
 
+    # -- sandbox de herramientas generadas ---------------------------------
+    # Limites del subproceso donde corre codigo generado por IA (ver
+    # core/sandbox.py) -tanto al probarlo como despues, ya aprobado, en
+    # conversaciones reales. Conservadores a proposito: son herramientas
+    # chicas (una llamada HTTP y algo de procesamiento), no scripts largos.
+    sandbox_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    sandbox_cpu_seconds: int = Field(default=5, ge=1, le=30)
+    sandbox_memory_mb: int = Field(default=256, ge=64, le=1024)
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _split(cls, value: object) -> object:

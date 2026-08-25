@@ -14,21 +14,26 @@ import httpx
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 
 from ...core import llm_provider, websearch
-from ...llm.prompts import wrap_untrusted
 from ...core.errors import NotFoundError, ProviderError, ValidationError
+from ...llm.prompts import wrap_untrusted
 from ..deps import Container, container
 from ..schemas import (
     AdminConfig,
     AdminStatus,
     ApiKeyCreated,
     ApiKeySummary,
+    CapabilityGapSummary,
     CreateApiKeyRequest,
+    CreateGeneratedToolRequest,
     CreateTelegramAgentApiRequest,
     CreateTelegramAgentRequest,
     CreateTelegramTokenRequest,
     GeneratedPromptResult,
+    GeneratedToolDetail,
+    GeneratedToolSummary,
     GeneratePromptRequest,
     HumanizePromptRequest,
+    RejectGeneratedToolRequest,
     SetSecretRequest,
     TelegramAgentApiSummary,
     TelegramAgentFileSummary,
@@ -336,6 +341,90 @@ async def delete_telegram_agent_api(
         raise NotFoundError("Esa API no existe.")
     if not await box.telegram_store.delete_api(api_id):
         raise NotFoundError("Esa API no existe.")
+
+
+# --------------------------------------------------------------------------
+# Sistema de agentes auto-extensibles: pedidos de capacidad detectados en
+# conversaciones reales (ver chat/service.py, tool solicitar_nueva_capacidad)
+# y las herramientas generadas a partir de ellos. Cada paso del pipeline
+# (generar codigo, probar en sandbox, aprobar, rechazar) lo dispara un click
+# desde aca -nunca ocurre solo.
+# --------------------------------------------------------------------------
+@router.get("/capability-gaps", response_model=list[CapabilityGapSummary])
+async def list_capability_gaps(box: Container = Depends(container)) -> list[CapabilityGapSummary]:
+    return [CapabilityGapSummary(**row) for row in await box.telegram_store.list_capability_gaps()]
+
+
+@router.get("/generated-tools", response_model=list[GeneratedToolSummary])
+async def list_generated_tools(
+    agent_id: str | None = None, box: Container = Depends(container)
+) -> list[GeneratedToolSummary]:
+    return [
+        GeneratedToolSummary(**row) for row in box.telegram_store.list_generated_tools(agent_id)
+    ]
+
+
+@router.get("/generated-tools/{tool_id}", response_model=GeneratedToolDetail)
+async def get_generated_tool(
+    tool_id: str, box: Container = Depends(container)
+) -> GeneratedToolDetail:
+    row = box.telegram_store.get_generated_tool(tool_id)
+    if row is None:
+        raise NotFoundError("Esa herramienta no existe.")
+    return GeneratedToolDetail(**row)
+
+
+@router.post("/generated-tools", response_model=GeneratedToolDetail, status_code=201)
+async def create_generated_tool(
+    payload: CreateGeneratedToolRequest, box: Container = Depends(container)
+) -> GeneratedToolDetail:
+    row = await box.telegram_store.create_generated_tool(
+        payload.agent_id, name=payload.name, description=payload.description,
+        source_gap_reasoning_id=payload.source_gap_reasoning_id,
+    )
+    return GeneratedToolDetail(**row)
+
+
+@router.post("/generated-tools/{tool_id}/generate", response_model=GeneratedToolDetail)
+async def generate_generated_tool_code(
+    tool_id: str, box: Container = Depends(container)
+) -> GeneratedToolDetail:
+    """PROPOSED -> GENERATING: Tool Designer + Code Agent escriben la
+    especificacion y el codigo. No ejecuta nada todavia -eso es el
+    siguiente paso, /test."""
+    return GeneratedToolDetail(**await box.telegram_store.generate_tool_code(tool_id))
+
+
+@router.post("/generated-tools/{tool_id}/test", response_model=GeneratedToolDetail)
+async def test_generated_tool(
+    tool_id: str, box: Container = Depends(container)
+) -> GeneratedToolDetail:
+    """GENERATING -> PENDING_APPROVAL o REJECTED: corre el codigo en el
+    sandbox restringido (ver core/sandbox.py) contra un ejemplo real."""
+    return GeneratedToolDetail(**await box.telegram_store.test_generated_tool(tool_id))
+
+
+@router.post("/generated-tools/{tool_id}/approve", response_model=GeneratedToolDetail)
+async def approve_generated_tool(
+    tool_id: str, box: Container = Depends(container)
+) -> GeneratedToolDetail:
+    """PENDING_APPROVAL -> ACTIVE. El unico camino a ACTIVE que existe."""
+    return GeneratedToolDetail(**await box.telegram_store.approve_generated_tool(tool_id))
+
+
+@router.post("/generated-tools/{tool_id}/reject", response_model=GeneratedToolDetail)
+async def reject_generated_tool(
+    tool_id: str, payload: RejectGeneratedToolRequest, box: Container = Depends(container)
+) -> GeneratedToolDetail:
+    return GeneratedToolDetail(
+        **await box.telegram_store.reject_generated_tool(tool_id, payload.reason)
+    )
+
+
+@router.delete("/generated-tools/{tool_id}", status_code=204)
+async def delete_generated_tool(tool_id: str, box: Container = Depends(container)) -> None:
+    if not await box.telegram_store.delete_generated_tool(tool_id):
+        raise NotFoundError("Esa herramienta no existe.")
 
 
 _PROMPT_WRITER_SYSTEM = """\

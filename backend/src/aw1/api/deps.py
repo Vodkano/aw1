@@ -71,7 +71,7 @@ class Container:
         secrets = SecretsStore(repo)
         api_keys = ApiKeyStore(repo)
         telegram_client = TelegramClient()
-        telegram_store = TelegramStore(repo, telegram_client, settings)
+        telegram_store = TelegramStore(repo, telegram_client, settings, secrets)
         await asyncio.gather(secrets.load(), api_keys.load(), telegram_store.load())
 
         llm = _build_llm_client(settings, secrets)

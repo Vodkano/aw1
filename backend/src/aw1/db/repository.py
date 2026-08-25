@@ -74,6 +74,20 @@ def _agent_api_from_row(row: aiosqlite.Row) -> dict[str, Any]:
     }
 
 
+def _generated_tool_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "agent_id": row["agent_id"],
+        "source_gap_reasoning_id": row["source_gap_reasoning_id"],
+        "name": row["name"], "description": row["description"], "status": row["status"],
+        "spec": json.loads(row["spec"]), "code": row["code"], "test_code": row["test_code"],
+        "sandbox_result": json.loads(row["sandbox_result"]), "reject_reason": row["reject_reason"],
+        "call_count": row["call_count"],
+        "last_called_at": _parse(row["last_called_at"]) if row["last_called_at"] else None,
+        "last_error": row["last_error"],
+        "created_at": _parse(row["created_at"]), "updated_at": _parse(row["updated_at"]),
+    }
+
+
 def _price_watch_from_row(row: aiosqlite.Row) -> dict[str, Any]:
     return {
         "id": row["id"], "token_id": row["token_id"], "chat_id": row["chat_id"],
@@ -257,6 +271,26 @@ class Repository:
         if row is None:
             return None
         return {"kind": row["kind"], "input": row["input"], "payload": json.loads(row["payload"])}
+
+    async def list_reasoning_by_kind(self, kind: str, limit: int = 200) -> list[dict[str, Any]]:
+        """Usado para listar los pedidos de capacidad detectados (kind=
+        "capability_gap") en el panel admin -reasoning ya existe, no hace
+        falta una tabla nueva para esto."""
+        cursor = await self._conn.execute(
+            "SELECT id, conversation_id, kind, input, payload, created_at FROM reasoning "
+            "WHERE kind = ? ORDER BY id DESC LIMIT ?",
+            (kind, limit),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [
+            {
+                "id": row["id"], "conversation_id": row["conversation_id"], "kind": row["kind"],
+                "input": row["input"], "payload": json.loads(row["payload"]),
+                "created_at": _parse(row["created_at"]),
+            }
+            for row in rows
+        ]
 
     # -- guardados ----------------------------------------------------------
     async def save_item(
@@ -781,6 +815,130 @@ class Repository:
         async with self._lock:
             cursor = await self._conn.execute(
                 "DELETE FROM telegram_agent_apis WHERE id = ?", (api_id,)
+            )
+            await self._conn.commit()
+            return bool(cursor.rowcount)
+
+    # -- herramientas generadas por IA a partir de un hueco detectado --------
+    async def create_generated_tool(
+        self, tool_id: str, agent_id: str, name: str, description: str,
+        source_gap_reasoning_id: int | None,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO generated_tools (id, agent_id, source_gap_reasoning_id, name, "
+                "description, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'PROPOSED', ?, ?)",
+                (
+                    tool_id, agent_id, source_gap_reasoning_id, name, description,
+                    _iso(now), _iso(now),
+                ),
+            )
+            await self._conn.commit()
+        return {
+            "id": tool_id, "agent_id": agent_id, "source_gap_reasoning_id": source_gap_reasoning_id,
+            "name": name, "description": description, "status": "PROPOSED",
+            "spec": {}, "code": "", "test_code": "", "sandbox_result": {}, "reject_reason": "",
+            "call_count": 0, "last_called_at": None, "last_error": "",
+            "created_at": now, "updated_at": now,
+        }
+
+    async def list_generated_tools(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        if agent_id is None:
+            cursor = await self._conn.execute(
+                "SELECT id, agent_id, source_gap_reasoning_id, name, description, status, "
+                "spec, code, test_code, sandbox_result, reject_reason, call_count, "
+                "last_called_at, last_error, created_at, updated_at FROM generated_tools "
+                "ORDER BY created_at DESC"
+            )
+        else:
+            cursor = await self._conn.execute(
+                "SELECT id, agent_id, source_gap_reasoning_id, name, description, status, "
+                "spec, code, test_code, sandbox_result, reject_reason, call_count, "
+                "last_called_at, last_error, created_at, updated_at FROM generated_tools "
+                "WHERE agent_id = ? ORDER BY created_at DESC",
+                (agent_id,),
+            )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [_generated_tool_from_row(row) for row in rows]
+
+    async def get_generated_tool(self, tool_id: str) -> dict[str, Any] | None:
+        cursor = await self._conn.execute(
+            "SELECT id, agent_id, source_gap_reasoning_id, name, description, status, "
+            "spec, code, test_code, sandbox_result, reject_reason, call_count, "
+            "last_called_at, last_error, created_at, updated_at FROM generated_tools WHERE id = ?",
+            (tool_id,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _generated_tool_from_row(row) if row else None
+
+    async def set_generated_tool_generated(
+        self, tool_id: str, spec_json: str, code: str, test_code: str
+    ) -> dict[str, Any] | None:
+        """PROPOSED -> GENERATING: Tool Designer + Code Agent ya
+        produjeron una especificacion y codigo (ver core/tool_designer.py,
+        core/code_agent.py)."""
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "UPDATE generated_tools SET spec = ?, code = ?, test_code = ?, "
+                "status = 'GENERATING', updated_at = ? WHERE id = ?",
+                (spec_json, code, test_code, _iso(utcnow()), tool_id),
+            )
+            await self._conn.commit()
+            if not cursor.rowcount:
+                return None
+        return await self.get_generated_tool(tool_id)
+
+    async def set_generated_tool_tested(
+        self, tool_id: str, sandbox_result_json: str, *, passed: bool, reject_reason: str = ""
+    ) -> dict[str, Any] | None:
+        """GENERATING -> PENDING_APPROVAL (si el sandbox dio bien) o
+        REJECTED (si no) -nunca pasa a ACTIVE sola, eso lo hace un humano
+        (ver set_generated_tool_status)."""
+        status = "PENDING_APPROVAL" if passed else "REJECTED"
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "UPDATE generated_tools SET sandbox_result = ?, status = ?, "
+                "reject_reason = ?, updated_at = ? WHERE id = ?",
+                (sandbox_result_json, status, reject_reason, _iso(utcnow()), tool_id),
+            )
+            await self._conn.commit()
+            if not cursor.rowcount:
+                return None
+        return await self.get_generated_tool(tool_id)
+
+    async def set_generated_tool_status(
+        self, tool_id: str, status: str, reject_reason: str = ""
+    ) -> dict[str, Any] | None:
+        """Aprobar (-> ACTIVE) o rechazar (-> REJECTED) -la ruta admin es
+        quien valida que la transicion tenga sentido antes de llamar esto."""
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "UPDATE generated_tools SET status = ?, reject_reason = ?, updated_at = ? "
+                "WHERE id = ?",
+                (status, reject_reason, _iso(utcnow()), tool_id),
+            )
+            await self._conn.commit()
+            if not cursor.rowcount:
+                return None
+        return await self.get_generated_tool(tool_id)
+
+    async def record_generated_tool_call(self, tool_id: str, *, ok: bool, error: str) -> None:
+        async with self._lock:
+            await self._conn.execute(
+                "UPDATE generated_tools SET call_count = call_count + 1, last_called_at = ?, "
+                "last_error = ? WHERE id = ?",
+                (_iso(utcnow()), "" if ok else error[:500], tool_id),
+            )
+            await self._conn.commit()
+
+    async def delete_generated_tool(self, tool_id: str) -> bool:
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "DELETE FROM generated_tools WHERE id = ?", (tool_id,)
             )
             await self._conn.commit()
             return bool(cursor.rowcount)

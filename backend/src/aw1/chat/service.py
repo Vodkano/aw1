@@ -36,7 +36,7 @@ from typing import Any
 import httpx
 
 from ..core import agent_apis as agent_apis_module
-from ..core import image_gen, llm_provider
+from ..core import image_gen, llm_provider, sandbox
 from ..core.agent_apis import tool_name as _api_tool_name
 from ..core.errors import ProviderError, ValidationError
 from ..core.secrets_store import SecretsStore
@@ -152,6 +152,63 @@ _IMAGE_TOOL_DEF: dict[str, Any] = {
 }
 
 
+# Herramienta nativa igual que la de arriba: le da al modelo una forma
+# explicita de decir "esto no lo puedo hacer con lo que tengo" en vez de
+# inventar una capacidad que no existe. Solo registra el pedido (ver
+# ChatService._log_capability_gap) -nunca dispara la generacion de codigo
+# sola; eso lo arranca un humano desde el panel admin. Solo se ofrece
+# cuando quien llama pasa allow_capability_requests=True (por ahora, solo
+# los agentes de Telegram).
+_CAPABILITY_TOOL_NAME = "solicitar_nueva_capacidad"
+_CAPABILITY_TOOL_DEF: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": _CAPABILITY_TOOL_NAME,
+        "description": (
+            "Registra que te pidieron algo concreto y verificable (un dato "
+            "en vivo, una accion) que no podes hacer con ninguna herramienta "
+            "disponible ahora. Usala solo para eso -nunca para charla "
+            "normal ni para algo que ya podes resolver conversando."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Nombre corto en snake_case, ej: consultar_dolar_hoy",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Que deberia hacer esa herramienta.",
+                },
+                "why": {
+                    "type": "string",
+                    "description": "Que pidio la persona que disparo esto.",
+                },
+            },
+            "required": ["name", "description", "why"],
+        },
+    },
+}
+
+
+def _generated_tool_def(tool_row: dict[str, Any]) -> dict[str, Any]:
+    """Una herramienta generada y aprobada (ver core/code_agent.py,
+    generated_tools en la base) se ofrece igual que una API configurada
+    por el admin -misma forma de tool-calling, el modelo no distingue una
+    de otra."""
+    spec = tool_row.get("spec") or {}
+    return {
+        "type": "function",
+        "function": {
+            "name": _api_tool_name(str(tool_row.get("name") or "herramienta")),
+            "description": str(tool_row.get("description") or "")[:500],
+            "parameters": spec.get("parameters")
+            or {"type": "object", "properties": {}, "required": []},
+        },
+    }
+
+
 class ChatService:
     def __init__(
         self,
@@ -198,6 +255,9 @@ class ChatService:
         fast_route: bool = False,
         agent_apis: list[dict[str, Any]] | None = None,
         allow_image_generation: bool = False,
+        agent_id: str | None = None,
+        allow_capability_requests: bool = False,
+        generated_tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         clean = " ".join(str(message or "").split())
         if not clean:
@@ -295,18 +355,26 @@ class ChatService:
         if wants_gpt:
             if self.gpt_configured():
                 try:
-                    if agent_apis or allow_image_generation:
-                        # Con APIs configuradas (o generacion de imagenes
-                        # habilitada) se resigna el streaming: el protocolo
+                    any_tool = (
+                        agent_apis or allow_image_generation
+                        or allow_capability_requests or generated_tools
+                    )
+                    if any_tool:
+                        # Con alguna herramienta de tool-calling disponible
+                        # (APIs configuradas, generacion de imagenes, pedido
+                        # de capacidad nueva, o herramientas ya generadas y
+                        # aprobadas) se resigna el streaming: el protocolo
                         # de tool calling de OpenAI necesita poder ir y
                         # volver con el resultado de cada llamada antes de
                         # la respuesta final -mas simple y confiable sin
                         # streaming a medio camino. En el caso normal (sin
-                        # ninguna de las dos) el camino de siempre no cambia.
+                        # ninguna de estas) el camino de siempre no cambia.
                         async for event in self._answer_with_gpt_tools(
                             conversation, clean, history, context_block, sources,
                             system_prompt=system_prompt, agent_apis=agent_apis or [],
                             allow_image_generation=allow_image_generation,
+                            agent_id=agent_id, allow_capability_requests=allow_capability_requests,
+                            generated_tools=generated_tools or [],
                         ):
                             yield event
                     else:
@@ -526,14 +594,16 @@ class ChatService:
         system_prompt: str | None = None,
         agent_apis: list[dict[str, Any]],
         allow_image_generation: bool = False,
+        agent_id: str | None = None,
+        allow_capability_requests: bool = False,
+        generated_tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
-        """Como _answer_with_gpt, pero con las APIs del agente (y, si
-        allow_image_generation, generar_imagen) disponibles como tool
-        calling de OpenAI -el modelo decide si necesita llamar alguna antes
-        de responder. Sin streaming: el protocolo de ida y vuelta con el
-        resultado de cada llamada no es compatible con leer la respuesta
-        token a token, y a diferencia del camino normal esto solo se usa
-        cuando hace falta al menos una de las dos."""
+        """Como _answer_with_gpt, pero con herramientas de tool calling de
+        OpenAI disponibles -el modelo decide si necesita llamar alguna
+        antes de responder. Sin streaming: el protocolo de ida y vuelta con
+        el resultado de cada llamada no es compatible con leer la
+        respuesta token a token, y a diferencia del camino normal esto
+        solo se usa cuando hace falta al menos una herramienta."""
         sources = sources or []
         user_content = f"{context_block}\n\n{message}" if context_block else message
         messages: list[dict[str, Any]] = [
@@ -545,6 +615,23 @@ class ChatService:
         apis_by_tool_name = {_api_tool_def(api)["function"]["name"]: api for api in agent_apis}
         if allow_image_generation:
             tools.append(_IMAGE_TOOL_DEF)
+        if allow_capability_requests:
+            tools.append(_CAPABILITY_TOOL_DEF)
+        # Una herramienta generada podria terminar con el mismo nombre
+        # saneado que una API del admin o una nativa -se omite (con aviso
+        # en el log) en vez de dejar que una tape a la otra en silencio.
+        reserved_names = {_IMAGE_TOOL_NAME, _CAPABILITY_TOOL_NAME, *apis_by_tool_name}
+        generated_by_tool_name: dict[str, dict[str, Any]] = {}
+        for tool_row in generated_tools or []:
+            tool_def = _generated_tool_def(tool_row)
+            tool_name = tool_def["function"]["name"]
+            if tool_name in reserved_names or tool_name in generated_by_tool_name:
+                logger.warning(
+                    "Herramienta generada '%s' omitida por colision de nombre.", tool_name
+                )
+                continue
+            tools.append(tool_def)
+            generated_by_tool_name[tool_name] = tool_row
         headers = {"Authorization": f"Bearer {self._openai_key()}"}
         base = self._settings.openai_base_url.rstrip("/")
         image_sent = False
@@ -612,6 +699,12 @@ class ChatService:
                     if image_url:
                         image_sent = True
                         yield ChatEvent("image", {"url": image_url})
+                elif name == _CAPABILITY_TOOL_NAME:
+                    result_text = await self._log_capability_gap(
+                        agent_id, conversation, message, args
+                    )
+                elif name in generated_by_tool_name:
+                    result_text = await self._run_generated_tool(generated_by_tool_name[name], args)
                 else:
                     api = apis_by_tool_name.get(name)
                     if api is None:
@@ -642,6 +735,54 @@ class ChatService:
         except (httpx.HTTPError, RuntimeError) as error:
             return f"Error generando la imagen: {error}", None
         return "Imagen generada y ya se le mando a la persona.", url
+
+    async def _log_capability_gap(
+        self, agent_id: str | None, conversation: str, message: str, args: dict[str, Any]
+    ) -> str:
+        """Nunca lanza -solo registra el pedido para que el administrador
+        lo vea en el panel. Generar la herramienta es un paso aparte que
+        arranca un humano desde ahi, nunca esto -detectar el hueco no
+        dispara la generacion de codigo sola."""
+        payload = {
+            "agent_id": agent_id,
+            "name": str(args.get("name", ""))[:80],
+            "description": str(args.get("description", ""))[:500],
+            "why": str(args.get("why", ""))[:500],
+            "triggering_message": message[:1000],
+        }
+        try:
+            await self._repo.save_reasoning(conversation, "capability_gap", message, payload)
+        except Exception:  # noqa: BLE001 - un fallo al registrar no debe tumbar el turno
+            logger.warning("No se pudo registrar el pedido de capacidad.")
+        return (
+            "Anotado: no tengo esa capacidad todavia. Quedo registrado para "
+            "revision del administrador."
+        )
+
+    async def _run_generated_tool(self, tool_row: dict[str, Any], args: dict[str, Any]) -> str:
+        """Corre en la MISMA sandbox restringida que se uso para probar la
+        herramienta antes de aprobarla -nunca gana mas privilegios al
+        activarse (ver core/sandbox.py). Nunca lanza, mismo contrato que
+        agent_apis.call."""
+        result = await sandbox.run_in_sandbox(
+            tool_row.get("code", ""), args,
+            timeout_seconds=self._settings.sandbox_timeout_seconds,
+            cpu_seconds=self._settings.sandbox_cpu_seconds,
+            memory_mb=self._settings.sandbox_memory_mb,
+        )
+        tool_id = tool_row.get("id")
+        if tool_id:
+            try:
+                await self._repo.record_generated_tool_call(
+                    tool_id, ok=result.ok, error=result.error
+                )
+            except Exception:  # noqa: BLE001 - registrar el uso no debe tumbar la respuesta
+                logger.warning(
+                    "No se pudo registrar el uso de la herramienta generada '%s'.", tool_id
+                )
+        if not result.ok:
+            return f"Error ejecutando la herramienta: {result.error}"
+        return json.dumps(result.output)
 
     @staticmethod
     def _explain_gpt(status: int) -> str:

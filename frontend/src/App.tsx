@@ -7,10 +7,13 @@ import { MemoryView } from "./views/MemoryView";
 import { SettingsView } from "./views/SettingsView";
 import { AdminView } from "./views/AdminView";
 import { AgentsView } from "./views/AgentsView";
+import { SelfExtensionView } from "./views/SelfExtensionView";
 import { api, ApiError, getToken, setToken } from "./lib/api";
 import type { Status } from "./types";
 
-const VALID: ViewKey[] = ["chat", "prices", "memory", "settings", "admin", "agents"];
+const VALID: ViewKey[] = [
+  "chat", "prices", "memory", "settings", "admin", "agents", "autoextension",
+];
 
 function fromHash(): ViewKey {
   const value = window.location.hash.replace("#", "") as ViewKey;
@@ -138,7 +141,7 @@ export default function App() {
 
   // /#admin y /#agents tienen su propia password, separada de este token -no
   // las bloquea el token general.
-  const isPrivateView = view === "admin" || view === "agents";
+  const isPrivateView = view === "admin" || view === "agents" || view === "autoextension";
   const needsAuth = !isPrivateView && tokenValid === false;
   const checking = !isPrivateView && tokenValid === null;
 
@@ -154,6 +157,7 @@ export default function App() {
           {view === "settings" && <SettingsView status={status} onRefresh={refresh} />}
           {view === "admin" && <AdminView />}
           {view === "agents" && <AgentsView />}
+          {view === "autoextension" && <SelfExtensionView />}
         </>
       )}
     </Shell>

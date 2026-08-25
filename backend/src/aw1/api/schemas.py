@@ -194,6 +194,56 @@ class UpdateTelegramAgentApiRequest(BaseModel):
     enabled: bool = True
 
 
+class CapabilityGapSummary(BaseModel):
+    id: int
+    conversation_id: str | None
+    agent_id: str | None
+    name: str
+    description: str
+    why: str
+    triggering_message: str
+    created_at: datetime
+    tool_id: str | None
+    tool_status: str | None
+
+
+class GeneratedToolSummary(BaseModel):
+    id: str
+    agent_id: str
+    source_gap_reasoning_id: int | None
+    name: str
+    description: str
+    status: str
+    call_count: int
+    last_called_at: datetime | None
+    last_error: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class GeneratedToolDetail(GeneratedToolSummary):
+    spec: dict[str, Any]
+    code: str
+    test_code: str
+    sandbox_result: dict[str, Any]
+    reject_reason: str
+
+
+class CreateGeneratedToolRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(min_length=1, max_length=500)
+    source_gap_reasoning_id: int | None = None
+
+
+class RejectGeneratedToolRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="", max_length=500)
+
+
 class TelegramAgentSummary(BaseModel):
     id: str
     label: str

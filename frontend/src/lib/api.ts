@@ -11,7 +11,10 @@ import type {
   AdminStatus,
   ApiKeyCreated,
   ApiKeySummary,
+  CapabilityGapSummary,
   Comparison,
+  GeneratedToolDetail,
+  GeneratedToolSummary,
   SavedItem,
   Status,
   StoreInfo,
@@ -345,4 +348,38 @@ export const admin = {
     adminRequest<void>(`/api/admin/telegram-agents/${agentId}/apis/${apiId}`, {
       method: "DELETE",
     }),
+
+  capabilityGaps: () => adminRequest<CapabilityGapSummary[]>("/api/admin/capability-gaps"),
+  generatedTools: (agentId?: string) =>
+    adminRequest<GeneratedToolSummary[]>(
+      `/api/admin/generated-tools${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`,
+    ),
+  generatedTool: (toolId: string) =>
+    adminRequest<GeneratedToolDetail>(`/api/admin/generated-tools/${toolId}`),
+  createGeneratedTool: (body: {
+    agent_id: string; name: string; description: string; source_gap_reasoning_id?: number | null;
+  }) =>
+    adminRequest<GeneratedToolDetail>("/api/admin/generated-tools", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  generateGeneratedToolCode: (toolId: string) =>
+    adminRequest<GeneratedToolDetail>(`/api/admin/generated-tools/${toolId}/generate`, {
+      method: "POST",
+    }),
+  testGeneratedTool: (toolId: string) =>
+    adminRequest<GeneratedToolDetail>(`/api/admin/generated-tools/${toolId}/test`, {
+      method: "POST",
+    }),
+  approveGeneratedTool: (toolId: string) =>
+    adminRequest<GeneratedToolDetail>(`/api/admin/generated-tools/${toolId}/approve`, {
+      method: "POST",
+    }),
+  rejectGeneratedTool: (toolId: string, reason = "") =>
+    adminRequest<GeneratedToolDetail>(`/api/admin/generated-tools/${toolId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+  deleteGeneratedTool: (toolId: string) =>
+    adminRequest<void>(`/api/admin/generated-tools/${toolId}`, { method: "DELETE" }),
 };
