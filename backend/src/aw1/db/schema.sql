@@ -198,3 +198,27 @@ CREATE TABLE IF NOT EXISTS generated_tools (
 );
 CREATE INDEX IF NOT EXISTS idx_generated_tools_agent ON generated_tools(agent_id);
 CREATE INDEX IF NOT EXISTS idx_generated_tools_status ON generated_tools(status);
+
+-- Traza de cada ejecucion que involucra IA (chat, agentes de Telegram,
+-- comparador de precios). No reemplaza a `reasoning` -esa guarda el
+-- contenido del razonamiento; esta guarda metadatos operacionales (que
+-- modelo, cuanto tardo, cuanto costo estimado, con que resultado) para
+-- poder ver costos y errores sin tener que leer logs. DDL identico al de
+-- schema_postgres.sql.
+CREATE TABLE IF NOT EXISTS execution_traces (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id      TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    provider      TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    tools_called  TEXT NOT NULL DEFAULT '[]',
+    status        TEXT NOT NULL DEFAULT 'ok',
+    latency_ms    INTEGER NOT NULL DEFAULT 0,
+    cost_estimate REAL NOT NULL DEFAULT 0,
+    error         TEXT NOT NULL DEFAULT '',
+    meta          TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_execution_traces_trace ON execution_traces(trace_id);
+CREATE INDEX IF NOT EXISTS idx_execution_traces_created ON execution_traces(id DESC);
+CREATE INDEX IF NOT EXISTS idx_execution_traces_source ON execution_traces(source, id DESC);

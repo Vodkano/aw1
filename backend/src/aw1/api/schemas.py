@@ -194,6 +194,21 @@ class UpdateTelegramAgentApiRequest(BaseModel):
     enabled: bool = True
 
 
+class ExecutionTraceSummary(BaseModel):
+    id: int
+    trace_id: str
+    source: str
+    provider: str
+    model: str
+    tools_called: list[str]
+    status: str
+    latency_ms: int
+    cost_estimate: float
+    error: str
+    meta: dict[str, Any]
+    created_at: datetime
+
+
 class CapabilityGapSummary(BaseModel):
     id: int
     conversation_id: str | None

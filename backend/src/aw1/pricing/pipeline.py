@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 
 from ..browser.pool import BrowserPool
 from ..core.errors import BrowserError, NoResultsError, ValidationError
+from ..core.tracing import record_trace
 from ..db.postgres_repository import PostgresRepository
 from ..db.repository import Repository
 from ..llm.judges import Judges
@@ -226,6 +227,16 @@ class PricePipeline:
             payload = comparison.model_dump(mode="json")
             await self._repo.cache_set(cache_key, payload, self._settings.cache_ttl_seconds)
             await self._repo.save_search(clean, {"product": plan.product, "offers": len(best)})
+            ai_stats = comparison.ai
+            await record_trace(
+                self._repo,
+                "precios",
+                provider="ollama",
+                model=getattr(self._judges, "_model", ""),
+                status="fallback" if ai_stats.get("fallbacks") else "ok",
+                latency_ms=int(comparison.elapsed * 1000),
+                meta={"offers": len(best), "stores": len(outcomes), **ai_stats},
+            )
 
         yield Event("done", {"comparison": comparison.model_dump(mode="json")})
 

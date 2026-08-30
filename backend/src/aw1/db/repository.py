@@ -292,6 +292,69 @@ class Repository:
             for row in rows
         ]
 
+    # -- trazas de ejecucion --------------------------------------------------
+    async def save_execution_trace(
+        self,
+        trace_id: str,
+        source: str,
+        provider: str = "",
+        model: str = "",
+        tools_called: list[str] | None = None,
+        status: str = "ok",
+        latency_ms: int = 0,
+        cost_estimate: float = 0.0,
+        error: str = "",
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        async with self._lock:
+            cursor = await self._conn.execute(
+                "INSERT INTO execution_traces "
+                "(trace_id, source, provider, model, tools_called, status, "
+                " latency_ms, cost_estimate, error, meta, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    trace_id,
+                    source,
+                    provider,
+                    model,
+                    json.dumps(tools_called or [], ensure_ascii=False),
+                    status,
+                    latency_ms,
+                    cost_estimate,
+                    error,
+                    json.dumps(meta or {}, ensure_ascii=False, default=str),
+                    _iso(utcnow()),
+                ),
+            )
+            await self._conn.commit()
+            return int(cursor.lastrowid or 0)
+
+    async def list_execution_traces(
+        self, source: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        if source:
+            cursor = await self._conn.execute(
+                "SELECT * FROM execution_traces WHERE source = ? ORDER BY id DESC LIMIT ?",
+                (source, limit),
+            )
+        else:
+            cursor = await self._conn.execute(
+                "SELECT * FROM execution_traces ORDER BY id DESC LIMIT ?", (limit,)
+            )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [
+            {
+                "id": row["id"], "trace_id": row["trace_id"], "source": row["source"],
+                "provider": row["provider"], "model": row["model"],
+                "tools_called": json.loads(row["tools_called"]),
+                "status": row["status"], "latency_ms": row["latency_ms"],
+                "cost_estimate": row["cost_estimate"], "error": row["error"],
+                "meta": json.loads(row["meta"]), "created_at": _parse(row["created_at"]),
+            }
+            for row in rows
+        ]
+
     # -- guardados ----------------------------------------------------------
     async def save_item(
         self,

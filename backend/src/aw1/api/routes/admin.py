@@ -28,6 +28,7 @@ from ..schemas import (
     CreateTelegramAgentApiRequest,
     CreateTelegramAgentRequest,
     CreateTelegramTokenRequest,
+    ExecutionTraceSummary,
     GeneratedPromptResult,
     GeneratedToolDetail,
     GeneratedToolSummary,
@@ -350,6 +351,14 @@ async def delete_telegram_agent_api(
 # (generar codigo, probar en sandbox, aprobar, rechazar) lo dispara un click
 # desde aca -nunca ocurre solo.
 # --------------------------------------------------------------------------
+@router.get("/execution-traces", response_model=list[ExecutionTraceSummary])
+async def list_execution_traces(
+    source: str | None = None, limit: int = 100, box: Container = Depends(container)
+) -> list[ExecutionTraceSummary]:
+    rows = await box.repo.list_execution_traces(source=source, limit=min(limit, 500))
+    return [ExecutionTraceSummary(**row) for row in rows]
+
+
 @router.get("/capability-gaps", response_model=list[CapabilityGapSummary])
 async def list_capability_gaps(box: Container = Depends(container)) -> list[CapabilityGapSummary]:
     return [CapabilityGapSummary(**row) for row in await box.telegram_store.list_capability_gaps()]

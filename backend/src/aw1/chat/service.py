@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -37,6 +38,7 @@ import httpx
 
 from ..core import agent_apis as agent_apis_module
 from ..core import image_gen, llm_provider, sandbox
+from ..core.tracing import record_trace
 from ..core.agent_apis import tool_name as _api_tool_name
 from ..core.errors import ProviderError, ValidationError
 from ..core.secrets_store import SecretsStore
@@ -271,6 +273,7 @@ class ChatService:
             raise ValidationError("Escribe un mensaje.")
 
         conversation = conversation_id or uuid.uuid4().hex
+        trace_source = "telegram" if fast_route else "chat"
         yield ChatEvent("start", {"conversation_id": conversation})
 
         if history_hours is not None:
@@ -374,13 +377,13 @@ class ChatService:
                             system_prompt=system_prompt, agent_apis=agent_apis or [],
                             allow_image_generation=allow_image_generation,
                             agent_id=agent_id, allow_capability_requests=allow_capability_requests,
-                            generated_tools=generated_tools or [],
+                            generated_tools=generated_tools or [], trace_source=trace_source,
                         ):
                             yield event
                     else:
                         async for event in self._answer_with_gpt(
                             conversation, clean, history, context_block, sources,
-                            system_prompt=system_prompt,
+                            system_prompt=system_prompt, trace_source=trace_source,
                         ):
                             yield event
                     return
@@ -406,7 +409,7 @@ class ChatService:
 
         async for event in self._answer_with_ollama(
             conversation, clean, history, context_block, sources,
-            system_prompt=system_prompt,
+            system_prompt=system_prompt, trace_source=trace_source,
         ):
             yield event
 
@@ -463,6 +466,7 @@ class ChatService:
         sources: list[str],
         *,
         system_prompt: str | None = None,
+        trace_source: str = "chat",
     ) -> AsyncIterator[ChatEvent]:
         messages = [{"role": "system", "content": system_prompt or CHAT_SYSTEM}]
         messages.extend(history)
@@ -470,17 +474,22 @@ class ChatService:
         messages.append({"role": "user", "content": user_content})
 
         collected: list[str] = []
+        model = self._chat_model()
+        provider = llm_provider.effective_provider(self._settings, self._secrets)
+        started = time.monotonic()
         try:
             async for piece in self._llm.stream(
                 messages,
-                model=self._chat_model(),
+                model=model,
                 timeout=self._settings.ollama_chat_timeout,
             ):
                 collected.append(piece)
                 yield ChatEvent("token", {"text": piece})
         except ProviderError as error:
-            model = self._chat_model()
-            provider = llm_provider.effective_provider(self._settings, self._secrets)
+            await record_trace(
+                self._repo, trace_source, provider=provider, model=model, status="error",
+                latency_ms=int((time.monotonic() - started) * 1000), error=error.message,
+            )
             hint = (
                 f"la clave de Groq y el modelo «{model}»"
                 if provider == "groq"
@@ -493,12 +502,21 @@ class ChatService:
 
         answer = "".join(collected).strip()
         if not answer:
+            await record_trace(
+                self._repo, trace_source, provider=provider, model=model, status="fallback",
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error="El modelo local no devolvio contenido.",
+            )
             async for event in self._say(
                 conversation, message, "El modelo local no devolvio contenido.", "system"
             ):
                 yield event
             return
 
+        await record_trace(
+            self._repo, trace_source, provider=provider, model=model,
+            latency_ms=int((time.monotonic() - started) * 1000),
+        )
         await self._persist(conversation, message, answer, "wikipedia" if sources else "local")
         yield ChatEvent(
             "done",
@@ -519,6 +537,7 @@ class ChatService:
         sources: list[str] | None = None,
         *,
         system_prompt: str | None = None,
+        trace_source: str = "chat",
     ) -> AsyncIterator[ChatEvent]:
         sources = sources or []
         user_content = f"{context_block}\n\n{message}" if context_block else message
@@ -535,6 +554,7 @@ class ChatService:
         }
         headers = {"Authorization": f"Bearer {self._openai_key()}"}
         collected: list[str] = []
+        started = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=60.0) as client, client.stream(
                 "POST",
@@ -565,15 +585,29 @@ class ChatService:
                         collected.append(piece)
                         yield ChatEvent("token", {"text": piece})
         except httpx.HTTPError as error:
+            await record_trace(
+                self._repo, trace_source, provider="gpt", model=self._settings.openai_model,
+                status="error", latency_ms=int((time.monotonic() - started) * 1000),
+                error=str(error),
+            )
             raise ProviderError("No se pudo contactar con GPT.") from error
 
         answer = "".join(collected).strip()
+        latency_ms = int((time.monotonic() - started) * 1000)
         if not answer:
+            await record_trace(
+                self._repo, trace_source, provider="gpt", model=self._settings.openai_model,
+                status="fallback", latency_ms=latency_ms, error="GPT no devolvio contenido.",
+            )
             async for event in self._say(
                 conversation, message, "GPT no devolvio contenido.", "system"
             ):
                 yield event
             return
+        await record_trace(
+            self._repo, trace_source, provider="gpt", model=self._settings.openai_model,
+            latency_ms=latency_ms,
+        )
         await self._persist(conversation, message, answer, "gpt")
         yield ChatEvent(
             "done",
@@ -597,6 +631,7 @@ class ChatService:
         agent_id: str | None = None,
         allow_capability_requests: bool = False,
         generated_tools: list[dict[str, Any]] | None = None,
+        trace_source: str = "chat",
     ) -> AsyncIterator[ChatEvent]:
         """Como _answer_with_gpt, pero con herramientas de tool calling de
         OpenAI disponibles -el modelo decide si necesita llamar alguna
@@ -635,6 +670,8 @@ class ChatService:
         headers = {"Authorization": f"Bearer {self._openai_key()}"}
         base = self._settings.openai_base_url.rstrip("/")
         image_sent = False
+        tools_called: list[str] = []
+        started = time.monotonic()
 
         # Tope de vueltas ida-y-vuelta con herramientas: un modelo que
         # insiste en llamar herramientas sin nunca responder no puede
@@ -654,8 +691,19 @@ class ChatService:
                         f"{base}/chat/completions", json=payload, headers=headers
                     )
             except httpx.HTTPError as error:
+                await record_trace(
+                    self._repo, trace_source, provider="gpt", model=self._settings.openai_model,
+                    tools_called=tools_called, status="error",
+                    latency_ms=int((time.monotonic() - started) * 1000), error=str(error),
+                )
                 raise ProviderError("No se pudo contactar con GPT.") from error
             if response.status_code >= 400:
+                await record_trace(
+                    self._repo, trace_source, provider="gpt", model=self._settings.openai_model,
+                    tools_called=tools_called, status="error",
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                    error=f"HTTP {response.status_code}",
+                )
                 raise ProviderError(self._explain_gpt(response.status_code))
 
             choice = response.json()["choices"][0]
@@ -671,12 +719,23 @@ class ChatService:
                     if image_sent:
                         answer = "Listo, ahi tienes la imagen."
                     else:
+                        await record_trace(
+                            self._repo, trace_source, provider="gpt", model=self._settings.openai_model,
+                            tools_called=tools_called, status="fallback",
+                            latency_ms=int((time.monotonic() - started) * 1000),
+                            error="GPT no devolvio contenido.",
+                        )
                         async for event in self._say(
                             conversation, message, "GPT no devolvio contenido.", "system"
                         ):
                             yield event
                         return
                 yield ChatEvent("token", {"text": answer})
+                await record_trace(
+                    self._repo, trace_source, provider="gpt", model=self._settings.openai_model,
+                    tools_called=tools_called,
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                )
                 await self._persist(conversation, message, answer, "gpt")
                 yield ChatEvent(
                     "done",
@@ -690,6 +749,7 @@ class ChatService:
             messages.append(assistant_message)
             for call in tool_calls:
                 name = call.get("function", {}).get("name", "")
+                tools_called.append(name)
                 try:
                     args = json.loads(call.get("function", {}).get("arguments") or "{}")
                 except ValueError:
