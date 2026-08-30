@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AW1 v3 — Documentación</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161922; --border:#262b38; --text:#e6e8ee;
+    --muted:#9aa3b5; --accent:#7dd3fc; --accent2:#a78bfa; --code:#1c2130;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f7f8fb; --panel:#ffffff; --border:#e4e7ee; --text:#1a1d27;
+      --muted:#5a6178; --accent:#0369a1; --accent2:#6d28d9; --code:#f0f1f6; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height:1.6;
+  }
+  .layout{display:flex; min-height:100vh}
+  nav{
+    width:260px; flex-shrink:0; border-right:1px solid var(--border);
+    padding:24px 16px; position:sticky; top:0; height:100vh; overflow-y:auto;
+  }
+  nav h1{font-size:1.05rem; margin:0 0 4px; padding:0 8px}
+  nav .sub{color:var(--muted); font-size:.8rem; margin:0 0 20px; padding:0 8px}
+  nav a{
+    display:block; color:var(--muted); text-decoration:none; font-size:.88rem;
+    padding:6px 8px; border-radius:6px;
+  }
+  nav a:hover{color:var(--text); background:var(--panel)}
+  nav .group{margin-top:16px; font-size:.72rem; text-transform:uppercase;
+    letter-spacing:.05em; color:var(--muted); padding:0 8px 4px; font-weight:600}
+  main{flex:1; max-width:880px; padding:40px 48px 120px; min-width:0}
+  section{margin-bottom:56px; scroll-margin-top:24px}
+  h1,h2,h3{line-height:1.25}
+  h2{
+    font-size:1.5rem; border-bottom:1px solid var(--border); padding-bottom:10px;
+    margin-top:0;
+  }
+  h3{font-size:1.1rem; color:var(--accent)}
+  p{color:var(--text)}
+  code{
+    background:var(--code); padding:2px 6px; border-radius:4px;
+    font-size:.85em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  pre{
+    background:var(--code); border:1px solid var(--border); border-radius:8px;
+    padding:16px; overflow-x:auto; font-size:.85rem;
+  }
+  pre code{background:none; padding:0}
+  table{border-collapse:collapse; width:100%; margin:16px 0; font-size:.9rem}
+  th,td{border:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top}
+  th{background:var(--panel)}
+  .badge{
+    display:inline-block; background:var(--panel); border:1px solid var(--border);
+    color:var(--muted); font-size:.72rem; padding:2px 8px; border-radius:999px;
+    margin-right:6px;
+  }
+  .callout{
+    border-left:3px solid var(--accent2); background:var(--panel);
+    padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:.92rem;
+  }
+  .callout.warn{border-left-color:#f59e0b}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:16px 0}
+  @media (max-width:700px){ .layout{flex-direction:column} nav{position:static; height:auto; width:100%} .grid{grid-template-columns:1fr} main{padding:24px}}
+  footer{color:var(--muted); font-size:.8rem; padding:24px 48px; border-top:1px solid var(--border)}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <h1>AW1 v3</h1>
+  <p class="sub">Documentación completa del proyecto</p>
+
+  <div class="group">Visión general</div>
+  <a href="#intro">Qué es AW1</a>
+  <a href="#arranque">Arranque rápido</a>
+  <a href="#estructura">Estructura del repo</a>
+
+  <div class="group">Chat y precios</div>
+  <a href="#chat">Chat con Ollama/GPT</a>
+  <a href="#comparador">Comparador de precios</a>
+  <a href="#decision-ia">Cómo decide la IA</a>
+  <a href="#api">API</a>
+  <a href="#config">Configuración</a>
+
+  <div class="group">Arquitectura</div>
+  <a href="#capas">Capas del sistema</a>
+  <a href="#navegador">El navegador</a>
+  <a href="#jueces">Los cuatro jueces</a>
+  <a href="#degradacion">Degradación</a>
+  <a href="#streaming">Streaming</a>
+  <a href="#dinero">Manejo del dinero</a>
+  <a href="#seguridad">Seguridad</a>
+  <a href="#descartado">Qué se descartó</a>
+  <a href="#limites">Límites conocidos</a>
+
+  <div class="group">Plataforma Telegram</div>
+  <a href="#telegram">Bots de Telegram</a>
+  <a href="#autoextension">Agentes auto-extensibles</a>
+
+  <div class="group">Operación</div>
+  <a href="#deploy">Deploy</a>
+  <a href="#schema">Cuidado con el schema</a>
+  <a href="#tests">Tests</a>
+  <a href="#estado">Estado actual</a>
+</nav>
+
+<main>
+
+<section id="intro">
+<h2>Qué es AW1</h2>
+<p>Un asistente personal de un solo usuario/administrador, pensado para correr
+en <strong>un solo servidor</strong> (EC2 en producción, o una laptop en
+desarrollo), sin Kubernetes, sin cola de mensajes, sin CI/CD. Tres piezas:</p>
+<div class="grid">
+<div class="callout"><strong>Chat</strong><br>Ollama local, con GPT opcional
+o automático según la tarea. Memoria de conversación, tool-calling, streaming
+token a token.</div>
+<div class="callout"><strong>Comparador de precios</strong><br>Navega tiendas
+chilenas reales con un Chromium controlado (Playwright), lee cada ficha y deja
+que el modelo decida cuál es el precio de venta.</div>
+<div class="callout"><strong>Bots de Telegram</strong><br>Plataforma de
+agentes de IA (prompt + personalidad) que pueden atender varios bots, con
+memoria corta, moderación, archivos/APIs propias y hasta la capacidad de
+pedir nuevas herramientas.</div>
+</div>
+<p>Desplegar es <code>git push</code> + SSM + <code>docker compose up --build</code>.</p>
+</section>
+
+<section id="arranque">
+<h2>Arranque rápido</h2>
+<pre><code>git clone &lt;tu-repo&gt; aw1 &amp;&amp; cd aw1
+
+make install        # backend + frontend + Chromium de Playwright
+cp .env.example .env
+
+ollama serve                    # en otra terminal
+ollama pull mistral
+
+make run            # http://127.0.0.1:8000</code></pre>
+<p><code>make install</code> hace, si preferís a mano:</p>
+<pre><code>cd backend  &amp;&amp; pip install -e ".[dev]" &amp;&amp; python -m playwright install chromium
+cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code></pre>
+<div class="callout warn"><code>playwright install chromium</code> <strong>no es
+opcional</strong>: sin él el comparador no tiene con qué entrar a las
+tiendas. Ocupa unos 400&nbsp;MB.</div>
+
+<h3>Comprobar la instalación sin tocar tiendas reales</h3>
+<pre><code>python scripts/demo_store.py 9100        # terminal 1
+
+# terminal 2
+AW1_DEMO_STORE_URL=http://127.0.0.1:9100 AW1_ALLOW_PRIVATE_HOSTS=true python -m aw1</code></pre>
+<p>Buscá <code>Zeta 12</code> en la pestaña Precios. La tienda de demostración
+pinta su catálogo con JavaScript y mezcla precio real, precio tachado, valor de
+cuotas y un producto recomendado, igual que una tienda de verdad.</p>
+
+<h3>Desarrollo con recarga en caliente</h3>
+<pre><code>cd backend  &amp;&amp; python -m aw1      # :8000
+cd frontend &amp;&amp; npm run dev        # :5173, con proxy al backend</code></pre>
+</section>
+
+<section id="estructura">
+<h2>Estructura del repo</h2>
+<pre><code>aw1/
+├── backend/
+│   ├── src/aw1/
+│   │   ├── settings.py           configuración tipada, validada al arrancar
+│   │   ├── core/                 errores, logging, SSRF, límite de uso, sandbox
+│   │   ├── db/                   repository.py (SQLite) + postgres_repository.py
+│   │   ├── llm/                  cliente Ollama, prompts, esquemas, jueces
+│   │   ├── browser/              Chromium compartido + extractores JS
+│   │   ├── stores/registry.py    catálogo de tiendas
+│   │   ├── pricing/              money · matching · rank · pipeline
+│   │   ├── chat/                 servicio de chat (ruteo Ollama/GPT, tools)
+│   │   ├── telegram/             orchestrator.py, agentes por bot
+│   │   └── api/                  FastAPI: rutas, esquemas y seguridad
+│   └── tests/
+├── frontend/
+│   └── src/                      React + TS + Vite + Tailwind v4
+├── scripts/demo_store.py         tienda simulada para verificar la instalación
+├── Dockerfile · docker-compose.yml · Makefile
+└── .github/workflows/ci.yml</code></pre>
+<p><code>backend/src/aw1/chat/service.py</code> es el corazón del chat (ruteo
+Ollama/GPT, tool-calling, streaming). <code>telegram/orchestrator.py</code> es
+el equivalente para los bots. <code>core/telegram_store.py</code> es la
+"capa de servicio" de todo lo relacionado a agentes de Telegram (caché en
+memoria + validaciones de negocio).</p>
+</section>
+
+<section id="chat">
+<h2>Chat con Ollama/GPT</h2>
+<p>Respuesta token a token, con memoria de conversación en SQLite. Las
+preguntas sobre personas se responden con Wikipedia citando la fuente. GPT es
+opcional y solo se consulta si el usuario lo autoriza, o automáticamente según
+la tarea lo requiera. Se eligió expresamente quedarse con el modelo más
+barato de GPT disponible en vez de habilitar otros más caros.</p>
+</section>
+
+<section id="comparador">
+<h2>Comparador de precios</h2>
+<p>Abre cada tienda con un Chromium real, espera a que el catálogo se pinte,
+lee la ficha del producto y le entrega a Ollama todo lo que un humano
+vería —título, datos estructurados y cada importe con el contexto donde
+aparece— para que <strong>el modelo decida</strong> cuál es el precio de
+venta. Devuelve el precio y el enlace directo de cada tienda.</p>
+<pre><code>Buscando: iPhone 15 128 GB
+  ● Mercado Libre   14 resultados · 2 precios      4.1 s
+  ● Falabella        9 resultados · 2 precios      6.8 s
+  ● Paris           11 resultados · 1 precio       7.2 s
+  ○ Ripley           0 resultados                  8.0 s
+  ● PC Factory       6 resultados · 1 precio       5.4 s
+
+MEJOR PRECIO   $749.990   en Falabella</code></pre>
+</section>
+
+<section id="decision-ia">
+<h2>Cómo decide la IA</h2>
+<p>El comparador no le pide al modelo que "busque precios". Le da un problema
+acotado en cada paso y verifica lo que responde.</p>
+<table>
+<tr><th>Paso</th><th>Quién</th><th>Qué pasa</th></tr>
+<tr><td>1. Plan</td><td>IA</td><td>Interpreta <code>"iphon 15 128"</code> → producto, variantes de búsqueda, términos obligatorios y accesorios a descartar</td></tr>
+<tr><td>2. Buscar</td><td>Chromium</td><td>Abre el buscador de cada tienda y espera a que el catálogo aparezca</td></tr>
+<tr><td>3. Candidatos</td><td>IA</td><td>Recibe títulos y precios de las tarjetas y elige cuáles son de verdad ese producto</td></tr>
+<tr><td>4. Leer ficha</td><td>Chromium</td><td>Abre cada ficha y extrae título, JSON-LD, disponibilidad y cada importe con su contexto</td></tr>
+<tr><td>5. Precio</td><td>IA</td><td>Decide cuál de esos importes es el precio de venta, y por qué</td></tr>
+<tr><td>6. Verificar</td><td>Código</td><td>Comprueba que el precio elegido exista de verdad en la página</td></tr>
+<tr><td>7. Rankear</td><td>Código</td><td>Convierte a pesos y ordena por valor real</td></tr>
+<tr><td>8. Veredicto</td><td>IA</td><td>Redacta la conclusión en dos frases</td></tr>
+</table>
+<div class="callout"><strong>El modelo no escribe números, elige entre los que
+ya existen.</strong> Si dice un precio que no coincide con el candidato que
+eligió, manda la página y se registra la corrección.</div>
+<div class="callout"><strong>El contenido de una tienda es dato, nunca
+instrucción.</strong> Va dentro de delimitadores y el prompt del sistema
+avisa al modelo que ignore cualquier orden que aparezca ahí.</div>
+<div class="callout"><strong>Si Ollama no está, el comparador sigue
+funcionando.</strong> Cada juez tiene una alternativa determinística; esas
+ofertas quedan marcadas como <code>sin IA</code>.</div>
+</section>
+
+<section id="api">
+<h2>API</h2>
+<table>
+<tr><th>Método</th><th>Ruta</th><th>Qué hace</th></tr>
+<tr><td>GET</td><td><code>/healthz</code></td><td>Sonda de vida (pública)</td></tr>
+<tr><td>GET</td><td><code>/api/status</code></td><td>Ollama, modelo, navegador, base de datos (pública)</td></tr>
+<tr><td>POST</td><td><code>/api/chat</code></td><td>Chat con respuesta en streaming (SSE)</td></tr>
+<tr><td>GET</td><td><code>/api/chat/conversations</code></td><td>Conversaciones guardadas</td></tr>
+<tr><td>GET/DELETE</td><td><code>/api/chat/{id}</code></td><td>Leer o borrar una conversación</td></tr>
+<tr><td>POST</td><td><code>/api/prices/search</code></td><td>Búsqueda con progreso en vivo (SSE)</td></tr>
+<tr><td>POST</td><td><code>/api/prices/compare</code></td><td>La misma búsqueda, respuesta única</td></tr>
+<tr><td>GET</td><td><code>/api/prices/stores</code></td><td>Catálogo de tiendas</td></tr>
+<tr><td>GET/POST/DELETE</td><td><code>/api/memory</code></td><td>Guardados</td></tr>
+</table>
+<p>Fuera de producción hay documentación interactiva en <code>/docs</code>.</p>
+</section>
+
+<section id="config">
+<h2>Configuración</h2>
+<p>Todo lleva prefijo <code>AW1_</code>, documentado en <code>.env.example</code>.</p>
+<table>
+<tr><th>Variable</th><th>Por defecto</th><th>Para qué</th></tr>
+<tr><td><code>AW1_OLLAMA_MODEL</code></td><td>mistral</td><td>Modelo del chat y de los jueces</td></tr>
+<tr><td><code>AW1_OLLAMA_FAST_MODEL</code></td><td>vacío</td><td>Modelo pequeño solo para decisiones del comparador</td></tr>
+<tr><td><code>AW1_BROWSER_MAX_CONTEXTS</code></td><td>3</td><td>Páginas simultáneas (con 8GB RAM no subir de 3)</td></tr>
+<tr><td><code>AW1_BROWSER_HEADLESS</code></td><td>true</td><td><code>false</code> para ver a Chromium trabajar</td></tr>
+<tr><td><code>AW1_SEARCH_BUDGET_SECONDS</code></td><td>90</td><td>Tope duro de una búsqueda completa</td></tr>
+<tr><td><code>AW1_STORES_PER_SEARCH</code></td><td>5</td><td>Menos tiendas, resultado más rápido</td></tr>
+<tr><td><code>AW1_BROWSER_PROXY_URL</code></td><td>vacío</td><td>Proxy residencial rotativo si una tienda bloquea la IP del datacenter</td></tr>
+<tr><td><code>AW1_FX_RATES_TO_CLP</code></td><td>tabla</td><td>Conversión para comparar monedas distintas</td></tr>
+<tr><td><code>AW1_API_TOKEN</code></td><td>vacío</td><td>Autenticación opcional para <code>/api/memory</code></td></tr>
+</table>
+</section>
+
+<section id="capas">
+<h2>Capas del sistema</h2>
+<p>Documento de decisiones de arquitectura. La versión anterior pedía el HTML
+del buscador con <code>httpx</code>: contra tiendas que pintan el catálogo con
+JavaScript eso devolvía cero resultados, siempre y en silencio. De ahí sale
+todo lo demás: la única forma de ver lo que ve una persona es ejecutar el
+JavaScript de la página.</p>
+<pre><code>     api/            FastAPI. Sin lógica de negocio: valida, autentica y traduce
+      │              errores de dominio a códigos HTTP.
+      ▼
+  chat/  pricing/    Los dos casos de uso. Orquestan; no saben de HTTP.
+      │
+      ├──▶ llm/      Decisiones del modelo + su verificación.
+      ├──▶ browser/  Chromium y los dos extractores de página.
+      ├──▶ stores/   Catálogo: cómo se busca en cada tienda.
+      └──▶ db/       SQLite/Postgres asíncrono.
+             │
+             ▼
+           core/     Errores, logging, SSRF, límite de uso.</code></pre>
+<p>Las dependencias apuntan siempre hacia abajo: <code>pricing/</code> no
+importa nada de <code>api/</code>, así que el pipeline se prueba sin levantar
+un servidor.</p>
+</section>
+
+<section id="navegador">
+<h2>El navegador</h2>
+<h3>Un Chromium, muchos contextos</h3>
+<p><code>BrowserPool</code> lanza Chromium una vez en el arranque y reparte
+contextos con un semáforo (lanzarlo por petición sería inviable). Cada
+contexto es efímero y aislado, sin cookies compartidas entre tiendas.</p>
+<h3>Se bloquean imágenes, fuentes y vídeo</h3>
+<p>Bloquearlas baja una carga de ~6s a menos de 2s. También se cortan
+rastreadores conocidos (Tag Manager, Hotjar, Criteo…).</p>
+<h3>Esperar a que la tienda termine</h3>
+<p><code>_settle</code> espera un selector propio de la tienda, luego
+<code>networkidle</code>, y agrega un margen fijo. Ninguna de las dos primeras
+es obligatoria; el objetivo es no leer un DOM a medio pintar.</p>
+<h3>La guardia SSRF va antes de navegar</h3>
+<p><code>netguard.resolves_public()</code> resuelve el DNS y comprueba IP
+pública antes de que el navegador emita la petición, para que una
+redirección no lleve a Chromium a la red local de quien ejecuta AW1.</p>
+</section>
+
+<section id="jueces">
+<h2>Los cuatro jueces</h2>
+<table>
+<tr><th>Juez</th><th>Entrada</th><th>Salida (JSON validado)</th></tr>
+<tr><td><code>plan_search</code></td><td>lo que escribió la persona</td><td>producto, variantes, obligatorios, prohibidos</td></tr>
+<tr><td><code>pick_products</code></td><td>tarjetas del buscador</td><td>ids elegidos con confianza</td></tr>
+<tr><td><code>read_page</code></td><td>el paquete de contexto</td><td><code>candidate_id</code>, <code>price</code>, <code>is_match</code>, motivo</td></tr>
+<tr><td><code>write_verdict</code></td><td>ofertas finales</td><td>dos frases en español</td></tr>
+</table>
+<p>Todo pasa por <code>format: json</code> de Ollama y se valida contra un
+modelo Pydantic; lo que no encaja se descarta.</p>
+<h3>Verificación: dónde se ataja la alucinación</h3>
+<ol>
+<li>Si el <code>candidate_id</code> no existe, se ignora la decisión y manda la heurística.</li>
+<li>Si el <code>price</code> no coincide con el candidato elegido, manda el candidato y se cuenta una corrección.</li>
+<li>Si el título no corresponde al producto, se descarta la oferta (un accesorio o falta de término obligatorio nunca se sobreescribe).</li>
+<li>Si el veredicto final menciona un precio que no está en la lista, se reescribe con la versión determinística.</li>
+</ol>
+</section>
+
+<section id="degradacion">
+<h2>Degradación</h2>
+<table>
+<tr><th>Si falla</th><th>Qué pasa</th></tr>
+<tr><td>Ollama apagado</td><td>El comparador usa heurísticas; ofertas marcadas <code>sin IA</code></td></tr>
+<tr><td>El modelo devuelve basura</td><td>El JSON no valida, se cuenta un <code>fallback</code> y sigue la heurística</td></tr>
+<tr><td>Chromium no instalado</td><td>La app arranca igual; el estado lo dice</td></tr>
+<tr><td>Una tienda cae</td><td>Las demás siguen; esa aparece con estado <code>error</code></td></tr>
+<tr><td>Se acaba el tiempo</td><td>Se cancela lo pendiente y se devuelve lo que sí se obtuvo</td></tr>
+<tr><td>Wikipedia no responde</td><td>La biografía la responde el modelo local</td></tr>
+<tr><td>Sin clave de GPT</td><td>No se ofrece el menú de confirmación</td></tr>
+</table>
+</section>
+
+<section id="streaming">
+<h2>Streaming</h2>
+<p>Una búsqueda tarda entre 30 y 90 segundos, así que el pipeline emite
+eventos según avanza:</p>
+<pre><code>start → plan → store_start → store_cards → store_picked
+      → offer (uno por precio, según aparecen)
+      → store_done → verdict_pending → done</code></pre>
+<div class="callout warn"><code>sse-starlette</code> separa las líneas con
+CRLF. Un parser que busque <code>\n\n</code> se queda esperando para siempre,
+sin error visible. <code>lib/api.ts</code> normaliza a LF antes de partir.</div>
+</section>
+
+<section id="dinero">
+<h2>Manejo del dinero</h2>
+<ul>
+<li><code>money.parse</code> resuelve la ambigüedad entre separador de miles y decimal.</li>
+<li>Todo se convierte a CLP con <code>AW1_FX_RATES_TO_CLP</code> antes de ordenar.</li>
+<li>Se descartan importes implausibles (un "2" de selector de cuotas, un placeholder de nueve cifras).</li>
+<li>El formato de salida es <code>$1.290.000</code>, nunca notación científica.</li>
+<li>Si la oferta más barata está muy por debajo de la mediana, se avisa: casi siempre es un accesorio o repuesto.</li>
+</ul>
+</section>
+
+<section id="seguridad">
+<h2>Seguridad</h2>
+<table>
+<tr><th>Riesgo</th><th>Mitigación</th></tr>
+<tr><td>CSRF desde cualquier web abierta</td><td><code>Origin</code> validado en toda petición con estado</td></tr>
+<tr><td>Servicio expuesto sin auth</td><td>Token Bearer opcional, obligatorio en producción</td></tr>
+<tr><td>SSRF vía URL o redirección</td><td>Guardia con resolución DNS antes de navegar</td></tr>
+<tr><td>Abuso</td><td>Limitador por cliente con ventana deslizante</td></tr>
+<tr><td>Secretos en los logs</td><td>Redacción por patrones en el formateador</td></tr>
+<tr><td>Inyección desde una tienda</td><td>Delimitadores + esquema de salida cerrado</td></tr>
+<tr><td>Fuga del razonamiento interno</td><td>Se guarda en <code>reasoning</code> y no se serializa nunca</td></tr>
+</table>
+</section>
+
+<section id="descartado">
+<h2>Qué se descartó y por qué</h2>
+<p><strong>Raspar buscadores (Bing, DuckDuckGo).</strong> Devuelven 202/403 la
+mayoría del tiempo y va contra sus términos.</p>
+<p><strong>Solo APIs públicas.</strong> Rapidísimo, pero deja fuera casi todo
+el comercio chileno. <code>stores/registry.py</code> permite declarar una
+tienda con otro modo de descubrimiento sin tocar el pipeline.</p>
+<p><strong>Que el modelo lea la página entera.</strong> Con <code>mistral</code>
+en un portátil son 10-30s por ficha y más alucinaciones. El extractor reduce
+una página de 300KB a ~15 líneas.</p>
+<p><strong>Que el modelo solo redacte al final.</strong> Rápido, pero entonces
+no decide nada de lo que importa.</p>
+<p><strong>Un ORM.</strong> SQLite/Postgres con SQL a mano: siete tablas,
+consultas simples, control total del bloqueo de escritura.</p>
+</section>
+
+<section id="limites">
+<h2>Límites conocidos</h2>
+<ul>
+<li>Los selectores de tienda envejecen (degrada, no rompe).</li>
+<li>Las tasas de cambio son fijas en configuración.</li>
+<li>Sin protección anti-bot: si hay captcha, esa tienda queda fuera.</li>
+<li>El limitador y el pool de navegador viven en memoria de un solo proceso.</li>
+<li>El SQLite está en texto plano.</li>
+</ul>
+</section>
+
+<section id="telegram">
+<h2>Plataforma de bots de Telegram</h2>
+<p>Cada agente es un prompt + una personalidad, y un agente puede atender
+varios bots. <code>telegram/orchestrator.py</code> orquesta multi-bot;
+<code>core/telegram_store.py</code> es la capa de servicio (caché en memoria +
+validaciones de negocio) de todo lo relacionado a agentes.</p>
+<p>Construido hasta ahora, en orden:</p>
+<ul>
+<li>Orquestación multi-bot desde el panel admin, cada bot con su agente.</li>
+<li>Memoria de corto plazo (48h), GPT forzado para las decisiones del agente,
+precios, personalidad configurable y corte automático por abuso.</li>
+<li>Archivos y APIs por agente: un catálogo fijo como contexto, o APIs que el
+modelo llama en vivo durante la conversación.</li>
+<li>Creador de prompts con few-shot (una frase alcanza para definir un
+agente) y un botón para "humanizar" el prompt resultante.</li>
+<li>Moderación antes de GPT y manejo de errores unificado.</li>
+<li>Tres personalidades con nombre propio: Camila, Javiera, Antonia.</li>
+<li>Memoria de corto plazo ampliada y <code>@buscar</code> para búsqueda web
+general dentro del chat de Telegram.</li>
+<li>Un enrutador de memoria: antes de responder decide si conviene revisar
+notas guardadas o ir directo a generar la salida.</li>
+<li>Al generar o humanizar un prompt, la descripción o el texto de entrada del
+usuario se marca explícitamente como <em>dato</em>, nunca como instrucción
+— mismo principio anti-inyección que en el comparador de precios.</li>
+</ul>
+<div class="callout">Vistas privadas del frontend (<code>agents</code>,
+<code>admin</code>, <code>autoextension</code>) piden una password aparte
+(<code>X-Admin-Password</code>) además del token general — ver
+<code>PasswordGate.tsx</code>.</div>
+</section>
+
+<section id="autoextension">
+<h2>Agentes auto-extensibles</h2>
+<p><code>core/sandbox.py</code>, <code>core/tool_designer.py</code>,
+<code>core/code_agent.py</code>, tabla <code>generated_tools</code>.</p>
+<p>Un agente de Telegram puede notar que le falta una capacidad y anotarlo
+(<code>solicitar_nueva_capacidad</code>, un tool-call nativo más, el mismo
+mecanismo que <code>generar_imagen</code>). Desde el panel "Auto-extensión"
+un humano puede convertir ese pedido en una herramienta generada por IA,
+probarla en un sandbox aislado, y aprobarla para que quede disponible en
+conversaciones reales.</p>
+<h3>Invariantes de seguridad (deliberadas, no relajar sin discutirlo primero)</h3>
+<ol>
+<li>Detectar un hueco nunca dispara la generación de código sola — hace falta
+un click humano en el panel para cada paso (generar, probar, aprobar).</li>
+<li>El Code Agent solo genera un archivo nuevo y autocontenido con una
+función <code>def run(input: dict) -> dict</code> — nunca un parche sobre
+archivos existentes del repositorio.</li>
+<li>El código generado corre en un subproceso con variables de entorno
+vacías (<code>env={}</code>, ninguna credencial real alcanzable), límites de
+CPU/memoria (<code>resource.setrlimit</code>, con fallback silencioso en
+macOS y aplicación real en Linux/producción), y timeout de pared.</li>
+<li>El código generado nunca importa <code>httpx</code>/<code>socket</code>/
+<code>os</code>/<code>subprocess</code> directo (bloqueado por
+<code>check_module_safety</code>, un chequeo AST que también bloquea el
+escape clásico sin imports vía atributos dunder). La única forma de pedir
+datos de internet es la función <code>fetch()</code> inyectada por el
+runner, que pasa por <code>core/netguard.py</code> — el mismo anti-SSRF que
+protege las APIs configuradas por el admin.</li>
+<li>Ninguna herramienta llega a <code>ACTIVE</code> sin aprobación humana
+explícita, sin importar qué tan bien haya salido la prueba de sandbox — un
+LLM revisando código de otro LLM no es un límite de seguridad confiable en
+esta infraestructura.</li>
+<li>Una herramienta ya aprobada sigue corriendo en el mismo sandbox
+restringido en producción — nunca gana más privilegios al activarse.</li>
+</ol>
+<h3>Qué se decidió explícitamente no construir todavía</h3>
+<p>Memoria episódica/procedural con scoring, dataset de entrenamiento por
+refuerzo, un "Evolver" que proponga mejoras del sistema solo. No es un
+olvido: no hay infraestructura de entrenamiento que los consuma, y los datos
+crudos que harían falta (pedidos de capacidad, uso de herramientas) ya se
+están guardando, así que no se pierde nada si se decide construir esto
+después.</p>
+</section>
+
+<section id="deploy">
+<h2>Deploy</h2>
+<pre><code>git push origin main
+# SSM en la instancia EC2 (i-084f5d23ba86d844f, us-east-2):
+aws ssm send-command --instance-ids i-084f5d23ba86d844f --document-name AWS-RunShellScript \
+  --parameters '{"commands":["cd /opt/aw1 && git fetch && git reset --hard origin/main"]}' --region us-east-2
+aws ssm send-command --instance-ids i-084f5d23ba86d844f --document-name AWS-RunShellScript \
+  --parameters '{"commands":["cd /opt/aw1 && docker compose up -d --build aw1"]}' --region us-east-2</code></pre>
+<p>Verificar salud después (vía SSM, <code>curl 127.0.0.1:8000/api/status</code>
+dentro de la instancia). El dominio público no siempre resuelve directo desde
+un sandbox de desarrollo — usar
+<code>curl --resolve app.aw1s.online:443:&lt;IP&gt; https://...</code> si hace
+falta confirmar desde afuera.</p>
+<div class="callout warn">La password de admin vive en la variable de entorno
+<code>AW1_ADMIN_PASSWORD</code> del <code>.env</code> de la instancia — no
+está en el repo.</div>
+
+<h3>Antes de publicarlo en internet</h3>
+<ol>
+<li><code>docker-compose.yml</code> publica el puerto solo en <code>127.0.0.1</code> a propósito.</li>
+<li><code>AW1_ENV=production</code>. <code>AW1_API_TOKEN</code> es opcional (protege solo <code>/api/memory</code>) pero si se define debe tener al menos 24 caracteres.</li>
+<li>HTTPS por delante (Caddy, Traefik o el proxy del proveedor).</li>
+<li><code>AW1_ALLOWED_ORIGINS</code> con el dominio real.</li>
+<li>Volumen persistente para <code>/data</code> y copias del SQLite.</li>
+<li>Chromium necesita RAM: ~350MB por contexto simultáneo.</li>
+</ol>
+</section>
+
+<section id="schema">
+<h2>Cuidado con el schema de base de datos</h2>
+<div class="callout warn"><strong>Incidente real de producción:</strong> un
+<code>;</code> dentro de un comentario <code>-- ...</code> truncó un
+<code>CREATE TABLE</code> a mitad, porque el loader partía el archivo por
+<code>;</code> de forma ingenua. Ya está arreglado (se filtran las líneas de
+comentario antes de partir), pero antes de cualquier deploy que toque el
+schema conviene verificar con este script:</div>
+<pre><code>python3 -c "
+for path in ['backend/src/aw1/db/schema.sql', 'backend/src/aw1/db/schema_postgres.sql']:
+    raw = open(path).read()
+    without_comments = '\n'.join(l for l in raw.splitlines() if not l.strip().startswith('--'))
+    statements = [s.strip() for s in without_comments.split(';') if s.strip()]
+    bad = [s[:60] for s in statements if not s.upper().startswith(('CREATE', 'PRAGMA'))]
+    print(path, 'count:', len(statements), 'raro (deberia ser []):', bad)
+"</code></pre>
+<p>No existe ningún mecanismo de migración (<code>ALTER TABLE</code>): todo
+el schema se crea con <code>CREATE TABLE IF NOT EXISTS</code>, que no le
+agrega columnas a una tabla que ya existe en producción. Agregar una columna
+a una tabla ya viva requiere escribir la migración a mano.</p>
+<p>Hay <strong>dos</strong> repositorios con el mismo contrato:
+<code>repository.py</code> (SQLite/aiosqlite, desarrollo local) y
+<code>postgres_repository.py</code> (Postgres/asyncpg, producción).
+<code>schema.sql</code> y <code>schema_postgres.sql</code> deben quedar
+idénticos en estructura — cada tabla nueva va en los dos, cada método nuevo
+va en los dos repos con la misma firma.</p>
+</section>
+
+<section id="tests">
+<h2>Tests y verificación</h2>
+<pre><code>cd backend && pytest -q -k "not browser and not pipeline"   # rapido, sin Chromium
+cd frontend && npx tsc --noEmit && npm run build</code></pre>
+<p>Patrones ya establecidos en el repo:</p>
+<ul>
+<li>Un "Fake" liviano por dependencia externa (<code>FakeOllama</code>,
+<code>FakeTelegramClient</code>, <code>FakeChatService</code>) en vez de
+mocks pesados.</li>
+<li><code>patch("httpx.AsyncClient.post", new=AsyncMock(...))</code> para
+simular respuestas de OpenAI/Telegram — si se parchea con una función
+<code>async def</code> plana hay que agregarle <code>self</code> como
+primer parámetro.</li>
+<li><code>netguard._allow_private</code> es un flag global de proceso que las
+fixtures compartidas dejan en <code>True</code> en casi todos los tests — la
+cobertura anti-SSRF va en archivos aislados (<code>test_agent_apis.py</code>,
+<code>test_sandbox.py</code>).</li>
+</ul>
+</section>
+
+<section id="estado">
+<h2>Estado actual</h2>
+<p>Al 2026-08-28: repo limpio, <code>main</code> al día con
+<code>origin/main</code>, 234 tests de backend pasando, frontend sin errores
+de tipos, y producción (EC2) desplegada con el mismo commit que corre en el
+repo. Nada a medio terminar ni deploy pendiente.</p>
+<p>Líneas posibles a seguir, sin decidir nada todavía:</p>
+<ol>
+<li>Usar el panel de Auto-extensión en un caso real (un bot pide una
+capacidad concreta) para validar el flujo de punta a punta en producción.</li>
+<li>Si se repiten pedidos de capacidad, evaluar automatizar más el paso de
+"generar" — manteniendo siempre la aprobación humana como límite.</li>
+</ol>
+</section>
+
+</main>
+</div>
+<footer>AW1 v3 · documentación generada a partir de README.md, docs/ARQUITECTURA.md, CLAUDE.md y ESTADO.md</footer>
+</body>
+</html>
