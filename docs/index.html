@@ -104,10 +104,18 @@
   <a href="#telegram">Bots de Telegram</a>
   <a href="#autoextension">Agentes auto-extensibles</a>
 
+  <div class="group">Observabilidad</div>
+  <a href="#trazas">Trazabilidad de ejecuciones</a>
+
+  <div class="group">Hacia AWIS</div>
+  <a href="#awis">La tesis AWIS (resumen)</a>
+  <a href="#awis-plan">Que se adopta y que no</a>
+
   <div class="group">Operación</div>
   <a href="#deploy">Deploy</a>
   <a href="#schema">Cuidado con el schema</a>
   <a href="#tests">Tests</a>
+  <a href="#nube">Trabajar desde la nube</a>
   <a href="#estado">Estado actual</a>
 </nav>
 
@@ -495,6 +503,89 @@ están guardando, así que no se pierde nada si se decide construir esto
 después.</p>
 </section>
 
+<section id="trazas">
+<h2>Trazabilidad de ejecuciones</h2>
+<p>Tabla <code>execution_traces</code> (SQLite y Postgres, DDL idéntico en
+ambos). Registra, por cada pedido que involucra IA —chat, agentes de
+Telegram, comparador de precios— metadatos operacionales: no reemplaza a
+<code>reasoning</code> (que guarda el contenido de lo que pensó el modelo),
+sino que guarda qué costó ejecutar esa decisión.</p>
+<table>
+<tr><th>Campo</th><th>Qué guarda</th></tr>
+<tr><td><code>trace_id</code></td><td>Identificador único de esa ejecución</td></tr>
+<tr><td><code>source</code></td><td><code>chat</code> / <code>telegram</code> / <code>precios</code></td></tr>
+<tr><td><code>provider</code> / <code>model</code></td><td>ollama, gpt, groq… y el modelo exacto usado</td></tr>
+<tr><td><code>tools_called</code></td><td>Lista JSON de herramientas invocadas en esa ejecución</td></tr>
+<tr><td><code>status</code></td><td><code>ok</code> / <code>error</code> / <code>fallback</code></td></tr>
+<tr><td><code>latency_ms</code> / <code>cost_estimate</code></td><td>Cuánto tardó y cuánto costó (estimado)</td></tr>
+<tr><td><code>error</code> / <code>meta</code></td><td>Detalle del error si lo hubo, y datos extra según la fuente</td></tr>
+</table>
+<p><code>core/tracing.py</code> expone <code>record_trace()</code>, que nunca
+lanza una excepción propia — una traza que falla en guardarse no puede tumbar
+la ejecución real que estaba siendo trazada. Está enganchado en
+<code>chat/service.py</code> (Ollama, GPT con y sin tool-calling — distingue
+chat de Telegram por el flag <code>fast_route</code>, exclusivo de los bots)
+y en <code>pricing/pipeline.py</code> (una traza por búsqueda completa).</p>
+<p>Consulta de solo lectura: <code>GET /api/admin/execution-traces</code>
+(admite <code>?source=</code> y <code>?limit=</code>). Todavía no tiene vista
+propia en el panel admin — por ahora solo la API.</p>
+</section>
+
+<section id="awis">
+<h2>La tesis AWIS (resumen)</h2>
+<p>AWIS (Artificial Workflow Intelligence System) es un documento de
+arquitectura que propone evolucionar el proyecto de "un asistente" a "una
+infraestructura de inteligencia y automatización" que otros sistemas puedan
+consumir vía API, sin necesitar implementar por sí mismos memoria,
+herramientas, agentes, seguridad u orquestación. Su núcleo, <strong>AW1S</strong>,
+sería un <em>Brain</em> persistente y orientado a eventos: interpreta
+requerimientos, planifica, selecciona recursos, ejecuta y evalúa resultados.</p>
+<p>Ideas centrales del documento:</p>
+<ul>
+<li><strong>LLM Gateway</strong>: abstracción para no depender de un proveedor único (auth, routing, fallback, retries, costos, métricas).</li>
+<li><strong>Routing inteligente de modelos</strong>: no usar siempre el modelo más grande — reglas y modelos especializados antes que un LLM caro.</li>
+<li><strong>Agentes con permisos propios</strong> (least privilege) y <strong>herramientas registradas</strong> con esquema, costo y timeout.</li>
+<li><strong>Memoria evaluada antes de persistir</strong> (candidate memory → relevancia → política → persistir/rechazar/expirar).</li>
+<li><strong>Datos y procesamiento científico como jobs</strong>, reproducibles (dataset, código, modelo, parámetros, resultados versionados).</li>
+<li><strong>Trazas de ejecución completas</strong> (input, contexto, llamadas a modelos/herramientas/agentes, costo, latencia, evaluación).</li>
+<li><strong>Seguridad por diseño</strong>: secret manager dedicado, aislamiento multi-tenant, sandbox para ejecución de código, audit log inmutable.</li>
+<li><strong>Panel admin completo</strong>: sistema, inteligencia, agentes, herramientas, datos, seguridad, automatización.</li>
+<li><strong>Control y gestión de costos</strong>: costo por operación/usuario/agente, límites presupuestarios, apagado de recursos ociosos.</li>
+<li><strong>Kill switch y autodestrucción controlada</strong>: separar "decidir destruir" de "autorizar destruir", con múltiples confirmaciones.</li>
+<li><strong>Escalabilidad progresiva</strong>: de un VPS a un control plane distribuido con clusters, sin obligar a saltar directo al nivel avanzado.</li>
+<li><strong>Ciclo de aprendizaje</strong>: producción → telemetría → dataset → evaluación → modelo/regla nueva → benchmark → promoción, siempre con validación humana.</li>
+</ul>
+</section>
+
+<section id="awis-plan">
+<h2>Qué se adopta de AWIS y qué no (por ahora)</h2>
+<p>AWIS describe la infraestructura de una plataforma multi-cliente
+(piensa algo del tamaño de lo que usaría una empresa con muchos usuarios y
+equipos). AW1 es un asistente de <strong>un solo usuario/admin en un solo
+servidor</strong>, por decisión deliberada. Construir la tesis completa tal
+cual costaría tiempo y dinero de mantener sin un beneficio real hoy — así
+que se adoptan las ideas que mejoran el sistema real sin inflar la
+infraestructura, y se deja el resto documentado como visión a futuro.</p>
+<table>
+<tr><th>Idea de AWIS</th><th>Estado en AW1</th></tr>
+<tr><td>LLM Gateway</td><td>Parcial — <code>chat/service.py</code> ya rutea Ollama/GPT/Groq; falta formalizarlo en una capa propia</td></tr>
+<tr><td>Memoria evaluada antes de persistir</td><td>Ya existe — el enrutador de memoria decide si conviene guardar</td></tr>
+<tr><td>Traza de ejecución (modelo, costo, latencia)</td><td><strong>Hecho</strong> — ver <a href="#trazas">Trazabilidad de ejecuciones</a></td></tr>
+<tr><td>Catálogo de herramientas con permisos/esquema</td><td>Parcial — ya existe para herramientas auto-generadas (<code>generated_tools</code>)</td></tr>
+<tr><td>Log de auditoría de admin</td><td>Pendiente — próximo candidato natural</td></tr>
+<tr><td>Multi-tenant / aislamiento por cliente</td><td>No aplica — un solo usuario/admin</td></tr>
+<tr><td>Bus de eventos, colas de jobs con workers</td><td>No construido — no hay volumen de trabajo pesado que lo justifique todavía</td></tr>
+<tr><td>Secret manager dedicado (Vault, etc.)</td><td>No — variables de entorno alcanzan para un solo admin</td></tr>
+<tr><td>Kill switch / autodestrucción controlada</td><td>No — sobredimensionado para un servidor único sin multi-tenant</td></tr>
+<tr><td>Entrenamiento de modelos propios / MLOps</td><td>Explícitamente descartado por ahora (ver sección Auto-extensibles)</td></tr>
+<tr><td>Clusters de GPU / control plane distribuido</td><td>No aplica al nivel de escala actual</td></tr>
+</table>
+<div class="callout">Nada de esto es un olvido: es una decisión consciente de
+no construir infraestructura de nivel empresarial para un sistema de un solo
+usuario. Si el proyecto crece hacia multi-usuario o multi-cliente, esta
+tabla es el punto de partida para revisar qué pasa a ser necesario.</div>
+</section>
+
 <section id="deploy">
 <h2>Deploy</h2>
 <pre><code>git push origin main
@@ -571,18 +662,44 @@ cobertura anti-SSRF va en archivos aislados (<code>test_agent_apis.py</code>,
 </ul>
 </section>
 
+<section id="nube">
+<h2>Trabajar desde la nube</h2>
+<p>Para no cargar la CPU local durante desarrollos grandes, el proyecto tiene
+dos caminos posibles para correr instalación, tests y hasta el chat/comparador
+completos fuera de la máquina local:</p>
+<h3>GitHub Codespaces</h3>
+<p><code>.devcontainer/devcontainer.json</code> + <code>setup.sh</code> ya
+están configurados: crean un entorno con Python, Node, Chromium y Ollama
+(modelo <code>llama3.2:3b</code>) instalados automáticamente. Se activa desde
+GitHub → <strong>Code → Codespaces → Create codespace on main</strong>. Tiene
+un límite de horas gratis por mes; superado eso, cobra.</p>
+<h3>VM propia (Oracle Cloud Free Tier)</h3>
+<p>Cuando no hay cupo gratis de Codespaces, alternativa sin costo: una VM
+<strong>Always Free</strong> de Oracle Cloud (shape <code>VM.Standard.A1.Flex</code>,
+hasta 4 OCPUs ARM y 24GB RAM, gratis indefinidamente, no solo los primeros
+meses). Ahí entra sin problema Chromium + Ollama corriendo a la vez. Se
+conecta por SSH con una clave dedicada (<code>~/.ssh/aw1_oracle</code>) para
+instalar y correr el proyecto igual que en el devcontainer.</p>
+<div class="callout warn">AWS Free Tier (una segunda EC2 chica) se descartó
+como alternativa por ahora: solo es gratis los primeros 12 meses de una
+cuenta AWS, y esta cuenta ya los superó.</div>
+</section>
+
 <section id="estado">
 <h2>Estado actual</h2>
-<p>Al 2026-08-28: repo limpio, <code>main</code> al día con
-<code>origin/main</code>, 234 tests de backend pasando, frontend sin errores
-de tipos, y producción (EC2) desplegada con el mismo commit que corre en el
-repo. Nada a medio terminar ni deploy pendiente.</p>
+<p>Al 2026-08-30: repo limpio y al día con <code>origin/main</code>, 234
+tests de backend pasando, frontend sin errores de tipos, y producción (EC2)
+desplegada. Se agregó trazabilidad de ejecuciones (<code>execution_traces</code>)
+como primer paso concreto de la tesis AWIS, y se dejó armado el camino para
+trabajar desde la nube (Codespaces o una VM Oracle Free Tier) de cara a un
+update grande.</p>
 <p>Líneas posibles a seguir, sin decidir nada todavía:</p>
 <ol>
+<li>Vista en el panel admin para las trazas de ejecución (hoy solo existe la API).</li>
+<li>Log de auditoría de acciones de admin (próximo punto de la tabla de AWIS).</li>
+<li>Formalizar el LLM Gateway a partir del ruteo Ollama/GPT/Groq ya existente.</li>
 <li>Usar el panel de Auto-extensión en un caso real (un bot pide una
 capacidad concreta) para validar el flujo de punta a punta en producción.</li>
-<li>Si se repiten pedidos de capacidad, evaluar automatizar más el paso de
-"generar" — manteniendo siempre la aprobación humana como límite.</li>
 </ol>
 </section>
 
