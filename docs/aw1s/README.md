@@ -7,8 +7,15 @@ traduccion de la idea a componentes, para decidir despues que se construye
 y como (o si) se conecta con lo que ya existe.
 
 - `planos/` — un archivo por documento/spec que se va recibiendo, en el
-  orden en que llega. `planos/0.1.0.1-SK.md` es el primero (Entidad, capas
-  de pre-procesamiento, memoria hibrida Postgres+pgvector).
+  orden en que llega, con el analisis linea a linea. `planos/0.1.0.1-SK.md`
+  es el primero (Entidad, capas de pre-procesamiento, memoria hibrida
+  Postgres+pgvector).
+- `documentacion/` — la version formal/de referencia de cada plano, ya
+  limpia de notas de trabajo. `documentacion/arquitectura.md` es la
+  version actual.
+- `prompts/` — los system prompts de las capas que son generativas
+  (Inteligencia, Humanizacion). Contexto y Memoria no llevan prompt: son
+  recuperacion/persistencia de datos, no generacion.
 - Este `README.md` — el mapa general, se actualiza a medida que se suman
   planos nuevos.
 
