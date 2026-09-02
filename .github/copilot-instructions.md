@@ -1,0 +1,103 @@
+# Instrucciones para GitHub Copilot en este repo
+
+Este archivo lo lee Copilot Chat automaticamente en cada request dentro de
+este workspace en VSCode. No lo pegues a mano — ya esta activo.
+
+## Antes de escribir codigo, siempre
+
+1. **Restablece el problema con tus propias palabras** antes de tocar
+   nada: que se pide, que archivos toca, que se rompe si te equivocas.
+   Si el pedido es ambiguo, decilo explicitamente en vez de asumir la
+   interpretacion mas facil de programar.
+2. **Lee antes de escribir**: `CLAUDE.md` (raiz del repo) tiene las
+   convenciones y trampas ya conocidas de este proyecto — no repitas
+   errores ya resueltos ahi. Para cualquier tarea relacionada con AW1S
+   (ver mas abajo), lee `docs/aw1s/documentacion/arquitectura.md` completo
+   y el archivo mas reciente en `docs/aw1s/planos/` antes de proponer
+   codigo — no soluciones "razonables en general", soluciones consistentes
+   con lo que esos documentos ya definieron.
+3. **No resuelvas de tu cuenta un punto que la documentacion marca como
+   "pendiente" o "punto abierto"**. Devolveme la pregunta en vez de asumir
+   un valor (umbral, regla de negocio, decision de privacidad) — esas
+   decisiones son del usuario, no tuyas ni mias.
+4. **Explica el porque antes del que**: si vas a proponer un diseno,
+   primero un parrafo corto de razonamiento (que alternativas evaluaste,
+   por que esta y no otra), despues el codigo. No generes codigo de
+   entrada sin ese paso — es lo que "pensar mas" significa aca: no
+   autocompletar el patron mas obvio, sino verificar que encaja con la
+   arquitectura ya definida antes de escribirlo.
+
+## Que es este repo
+
+AW1: asistente personal de un solo usuario/administrador. Chat (Ollama
+local, GPT opcional), comparador de precios que navega tiendas reales con
+Chromium, y una plataforma de bots de Telegram (cada agente = prompt +
+personalidad). Corre en un unico servidor EC2, sin Kubernetes, sin cola de
+mensajes, sin CI/CD real — deploy es `git push` + SSM + `docker compose`.
+
+Stack: FastAPI + Python (backend/), React + TS + Vite + Tailwind v4
+(frontend/), SQLite en local / Postgres en produccion con dos repositorios
+de mismo contrato (`db/repository.py` y `db/postgres_repository.py`).
+
+## Reglas que no se relajan en ningun archivo de este repo
+
+- **Schema**: `db/schema.sql` y `db/schema_postgres.sql` tienen que quedar
+  identicos en estructura — cualquier tabla o metodo nuevo va en los dos.
+  No existe mecanismo de migracion (`ALTER TABLE`): agregar una columna a
+  una tabla que ya existe en produccion necesita migracion escrita a mano,
+  nunca alcanza con editar el `CREATE TABLE`. Antes de tocar cualquiera de
+  los dos archivos, correr la verificacion de comentarios que describe
+  `CLAUDE.md` (un `;` dentro de un `--` comentario ya trunco un CREATE
+  TABLE en produccion una vez).
+- **Tests**: un "Fake" liviano por dependencia externa (ver
+  `tests/fakes.py`), no mocks pesados. `patch("httpx.AsyncClient.post",
+  new=AsyncMock(...))` para simular APIs externas — si se parchea con una
+  funcion `async def` plana en vez de `AsyncMock`, hay que agregarle
+  `self` como primer parametro.
+- **Sandbox de herramientas generadas** (`core/sandbox.py`,
+  `core/tool_designer.py`): las cinco invariantes de seguridad ahi
+  (aprobacion humana obligatoria, `env={}`, sin `httpx`/`socket`/`os`/
+  `subprocess` directo, todo trafico de red pasa por `core/netguard.py`)
+  no se relajan sin discutirlo explicitamente con el usuario primero.
+- **Sin abstracciones prematuras**: no agregues capas, flags de feature ni
+  manejo de errores para casos que no pueden pasar. Tres lineas parecidas
+  es mejor que una abstraccion prematura.
+- **Comentarios**: por defecto ninguno. Solo si explican un porque
+  no-obvio (una restriccion oculta, un workaround de un bug puntual) —
+  nunca que hace el codigo, para eso estan los nombres.
+
+## AW1S — evolucion "pesada"/MVP (estado: solo diseno, todavia sin codigo)
+
+Vive en `docs/aw1s/`: `documentacion/arquitectura.md` es la spec de
+referencia, `planos/` el historial de cada documento/decision en el orden
+en que se tomo, `prompts/` los system prompts ya definidos para las capas
+generativas.
+
+Puntos que Copilot tiene que respetar si se empieza a implementar algo de
+esto:
+
+- Es un sistema separado del AW1 actual todavia — la relacion entre ambos
+  (reemplazo, paralelo, AW1 como "Procesamiento principal" de AW1S) es
+  explicitamente un punto pendiente. No asumas que se integra con
+  `chat/service.py` sin que se haya decidido.
+- Separacion estricta de responsabilidades entre componentes (Atajo
+  semantico, Inteligencia, Contexto, Procesamiento principal,
+  Humanizacion, Memoria) — no fusiones capas para simplificar el codigo.
+  Contexto no decide que buscar, solo ejecuta lo que decidio Inteligencia;
+  Humanizacion no cambia el razonamiento, solo la forma.
+- Memoria: PostgreSQL es la unica fuente de verdad, pgvector vive DENTRO
+  de Postgres (nunca una base vectorial separada), no todo se vectoriza.
+- El modelo de datos de `documentacion/arquitectura.md#3` es conceptual,
+  no un schema SQL — no lo confundas ni lo mezcles con
+  `backend/src/aw1/db/schema.sql`, que es el sistema real en produccion.
+- El Atajo semantico ya tiene calibracion v1 definida (filtro de
+  longitud → match exacto → similitud coseno con umbrales 0.93/0.85) —
+  no reinventes esos numeros, estan en
+  `docs/aw1s/planos/0.1.0.2-atajo-semantico.md`.
+
+## Cuando no estes seguro
+
+Preguntá en vez de generar codigo especulativo — este proyecto tiene un
+historial de tener que deshacer trabajo por asumir de mas (ver
+"El usuario" en `CLAUDE.md`: prefiere que se le pregunte con opciones
+concretas cuando la decision es cara de revertir, en vez de que se asuma).
