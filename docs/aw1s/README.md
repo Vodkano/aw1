@@ -18,6 +18,10 @@ y como (o si) se conecta con lo que ya existe.
   recuperacion/persistencia de datos, no generacion.
 - Este `README.md` — el mapa general, se actualiza a medida que se suman
   planos nuevos.
+- El codigo vive fuera de `docs/`, en `aw1s/` (raiz del repo) — paquete
+  Python aislado, ver `aw1s/README.md` para instalar y correr tests, y
+  que hay implementado hasta ahora (Atajo semantico completo, calibracion
+  v1).
 
 ## Mapa (segun lo definido hasta ahora)
 

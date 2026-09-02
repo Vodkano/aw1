@@ -66,12 +66,18 @@ de mismo contrato (`db/repository.py` y `db/postgres_repository.py`).
   no-obvio (una restriccion oculta, un workaround de un bug puntual) —
   nunca que hace el codigo, para eso estan los nombres.
 
-## AW1S — evolucion "pesada"/MVP (estado: solo diseno, todavia sin codigo)
+## AW1S — evolucion "pesada"/MVP
 
-Vive en `docs/aw1s/`: `documentacion/arquitectura.md` es la spec de
+Diseno en `docs/aw1s/`: `documentacion/arquitectura.md` es la spec de
 referencia, `planos/` el historial de cada documento/decision en el orden
 en que se tomo, `prompts/` los system prompts ya definidos para las capas
 generativas.
+
+Codigo en `aw1s/` (raiz del repo, paquete Python propio, **no** dentro de
+`backend/`) — leer `aw1s/README.md` antes de tocar nada ahi: que esta
+implementado, que sigue, como correr sus tests (`.venv` propio, no el de
+`backend/`). Implementado hasta ahora: el Atajo semantico completo
+(`aw1s/src/aw1s/atajo_semantico/`), calibracion v1.
 
 Puntos que Copilot tiene que respetar si se empieza a implementar algo de
 esto:
