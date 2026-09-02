@@ -33,19 +33,34 @@ curado — distinto del pgvector de Memoria (seccion 2.5): este indice no
 es el historial dinamico de conversaciones, es una lista acotada y
 mantenida a mano de pares frase→respuesta.
 
-**Salida**: si hay match por encima del umbral definido, la respuesta
-prearmada, sin pasar por Inteligencia, Procesamiento principal ni
-Humanizacion. Si no hay match, el mensaje sigue el flujo normal completo
-(seccion 4).
+**Calibracion (v1)**, en tres pasos, del mas barato al mas caro — se sale
+apenas uno autoriza o descarta:
+1. Filtro de longitud: mensajes de mas de 6 palabras / 40 caracteres no se
+   evaluan, van directo al flujo completo.
+2. Match exacto normalizado (minusculas, sin tildes/puntuacion) contra el
+   indice: autoriza directo si matchea 1:1.
+3. Similitud coseno por embedding: ≥0.93 autoriza; 0.85–0.93 no autoriza
+   pero se loguea como casi-match para revisar el indice; <0.85 no
+   autoriza.
+
+Ademas, con sesion activa (interaccion previa reciente sin resolver) el
+atajo no se aplica salvo que la entrada matcheada sea de categoria
+"despedida". Los valores numericos son punto de partida, se ajustan con
+datos reales una vez que haya trafico. Detalle completo en
+`planos/0.1.0.2-atajo-semantico.md`, seccion "Calibracion (v1)".
+
+Este listado por si solo ya resuelve el caso de riesgo que motivo la
+calibracion: "hola, tengo un problema urgente" tiene 8 palabras, se
+descarta en el paso 1 (filtro de longitud) sin necesidad de calcular
+ningun score.
+
+**Salida**: si hay match autorizado, la respuesta prearmada, sin pasar por
+Inteligencia, Procesamiento principal ni Humanizacion. Si no hay match, el
+mensaje sigue el flujo normal completo (seccion 4).
 
 **Por que existe**: mitigar el costo operativo descrito en la seccion 7 —
 la mayoria del trafico conversacional real es trivial y no necesita
 clasificacion ni resolucion.
-
-**Riesgo a controlar**: un umbral mal calibrado puede hacer que un mensaje
-real matchee por una frase parecida (ej. "hola, tengo un problema urgente"
-contestado como si fuera solo "hola"). Ver puntos abiertos en el plano de
-origen.
 
 ### 2.1 Inteligencia
 
@@ -229,8 +244,10 @@ resuelve.
    puede recibir.
 4. Relacion entre AW1S y el AW1 actual: sistema nuevo, reemplazo de
    `chat/service.py`, o ejecucion en paralelo.
-5. Umbral de similitud y curaduria del indice del Atajo semantico
-   (seccion 2.0), y como evitar falsos positivos con mensajes reales.
+5. ~~Umbral de similitud del Atajo semantico~~ — resuelto v1 en seccion
+   2.0 / `planos/0.1.0.2-atajo-semantico.md`. Sigue abierto: como se
+   puebla/curan el indice (alta de entradas nuevas) y el limite exacto de
+   "reciente" para la regla de sesion activa.
 6. Alcance exacto de "todos los datos del usuario" que Inteligencia
    persiste, y su politica de retencion — decision de producto/privacidad,
    no solo tecnica (seccion 2.1).

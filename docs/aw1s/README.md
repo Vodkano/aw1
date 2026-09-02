@@ -59,6 +59,14 @@ se responde directo sin llamar a ningun modelo. Solo cuando no hay match
 entra la Entidad completa. Detalle en
 `documentacion/arquitectura.md#20-atajo-semantico-fast-path`.
 
+Calibracion del umbral (v1): filtro de longitud (≤6 palabras) → match
+exacto normalizado → similitud coseno (≥0.93 autoriza, 0.85-0.93 se
+loguea sin autorizar, <0.85 descarta) → se bloquea igual si hay sesion
+activa salvo que sea una despedida. Resuelve el riesgo de que un mensaje
+largo tipo "hola, tengo un problema urgente" se conteste como saludo:
+se descarta en el primer filtro, antes de calcular ningun score. Detalle
+en `planos/0.1.0.2-atajo-semantico.md`.
+
 **Por que el ciclo entre Inteligencia y Contexto es ida y vuelta**: el
 documento original permite que Inteligencia rechace lo recuperado y pida
 otra busqueda antes de dejar pasar el problema a Procesamiento principal.
