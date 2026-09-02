@@ -77,7 +77,15 @@ Codigo en `aw1s/` (raiz del repo, paquete Python propio, **no** dentro de
 `backend/`) — leer `aw1s/README.md` antes de tocar nada ahi: que esta
 implementado, que sigue, como correr sus tests (`.venv` propio, no el de
 `backend/`). Implementado hasta ahora: el Atajo semantico completo
-(`aw1s/src/aw1s/atajo_semantico/`), calibracion v1.
+(`aw1s/src/aw1s/atajo_semantico/`, calibracion v1, verificado con tests) y
+el schema + capa de persistencia (`aw1s/src/aw1s/db/schema.sql` +
+`aw1s/src/aw1s/almacenamiento/`) — esta segunda parte usa Postgres+pgvector
+reales via asyncpg y **todavia no se probo contra una base real** (sin
+Docker disponible al escribirla). Antes de construir algo nuevo sobre
+`almacenamiento/postgres.py`, correr `aw1s/scripts/verificar_schema.py`
+contra un Postgres+pgvector real y arreglar lo que salga mal ahi primero
+-no asumir que el SQL esta bien solo porque los tests con Fakes pasan (esos
+prueban la logica de orquestacion, no el SQL en si).
 
 Puntos que Copilot tiene que respetar si se empieza a implementar algo de
 esto:

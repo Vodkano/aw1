@@ -182,6 +182,12 @@ constraints. No debe confundirse ni fusionarse con el schema real de AW1 v3
 (`backend/src/aw1/db/schema.sql` / `schema_postgres.sql`), que es un
 sistema en produccion con su propio ciclo de cambios.
 
+**Implementado**: `aw1s/src/aw1s/db/schema.sql` baja este modelo a tablas
+Postgres+pgvector reales, y `aw1s/src/aw1s/almacenamiento/` es la capa de
+persistencia sobre ese schema (protocolo `RepositorioAlmacenamiento` +
+implementacion `RepositorioPostgres`). Sin probar todavia contra un
+Postgres real, ver `aw1s/README.md`.
+
 ## 4. Flujo de una interaccion
 
 ```
