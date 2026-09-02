@@ -51,7 +51,8 @@ origen.
 
 **Responsabilidad**: analizar la entrada antes de que llegue al
 procesamiento principal. Clasifica el problema y determina que informacion
-hace falta para resolverlo.
+hace falta para resolverlo. Ademas, recopila y persiste los datos del
+usuario/interaccion en la base de datos — ver "Persistencia" mas abajo.
 
 **Entrada**:
 - Mensaje/input del usuario
@@ -67,6 +68,17 @@ hace falta para resolverlo.
 necesita, donde buscarla (Postgres, pgvector, o ambos), que tan relevante
 es, cuanta recuperar, y si la interaccion actual amerita usar memoria de
 sesion, memoria semantica, o combinar fuentes.
+
+**Persistencia** (fuente: `planos/0.1.0.3-inteligencia-recoleccion-datos.md`,
+aporte en conversacion, no parte de la spec 0.1.0.1-SK original):
+Inteligencia no es un componente de solo lectura — ademas de clasificar,
+escribe en Postgres las entidades estructuradas de la interaccion (Usuario,
+Sesion, Interaccion, Evento) apenas las recibe, temprano en el ciclo. Esto
+es distinto de lo que hace Memoria (seccion 2.5), que decide al **cierre**
+del ciclo que se eleva a Memoria semantica y se vectoriza. Alcance de "todos
+los datos del usuario" y su politica de retencion: sin definir todavia, ver
+puntos abiertos en el plano de origen — es una decision de producto/
+privacidad, no solo de arquitectura.
 
 **Regla de control**: puede iterar. Si evalua que la informacion
 recuperada por Contexto no alcanza, vuelve a emitir una necesidad de
@@ -113,8 +125,11 @@ el procesamiento principal — solo su forma de presentacion.
 
 ### 2.5 Memoria
 
-**Responsabilidad**: persistir la informacion de cada interaccion y
-decidir que se conserva mas alla de esa interaccion puntual.
+**Responsabilidad**: decidir que se conserva mas alla de la interaccion
+puntual y persistirlo como Memoria semantica. Los datos crudos de la
+interaccion (Usuario, Sesion, Interaccion, Evento) ya quedaron escritos por
+Inteligencia al principio del ciclo (seccion 2.1) — Memoria trabaja sobre
+lo que ya existe, no repite esa escritura.
 
 **Arquitectura**: hibrida, sobre una unica infraestructura.
 - **PostgreSQL**: fuente de verdad. Todo dato persistente (usuarios,
@@ -160,6 +175,7 @@ Entrada
         → match fuerte: responde directo con lo prearmado. FIN, sin LLM.
         → sin match: continua
   → Inteligencia: analiza y clasifica
+  → Inteligencia: persiste Usuario / Sesion / Interaccion / Evento en Postgres
   → Inteligencia: determina necesidad de informacion
   → Contexto: recupera (Postgres / pgvector / ambos)
   → Inteligencia: evalua si alcanza
@@ -213,5 +229,10 @@ resuelve.
    puede recibir.
 4. Relacion entre AW1S y el AW1 actual: sistema nuevo, reemplazo de
    `chat/service.py`, o ejecucion en paralelo.
+5. Umbral de similitud y curaduria del indice del Atajo semantico
+   (seccion 2.0), y como evitar falsos positivos con mensajes reales.
+6. Alcance exacto de "todos los datos del usuario" que Inteligencia
+   persiste, y su politica de retencion — decision de producto/privacidad,
+   no solo tecnica (seccion 2.1).
 
 Se actualiza este documento a medida que lleguen mas fuentes.

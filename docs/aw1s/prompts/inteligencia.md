@@ -71,6 +71,16 @@ Reglas:
 
 ## Notas de integracion
 
+- **Persistencia de datos del usuario, fuera del prompt.** Segun
+  `planos/0.1.0.3-inteligencia-recoleccion-datos.md`, el componente
+  Inteligencia tambien escribe en Postgres (Usuario, Sesion, Interaccion,
+  Evento) apenas recibe la interaccion. Eso es un efecto de lado del
+  codigo que envuelve esta llamada, no algo que el modelo deba producir en
+  el JSON de salida — el prompt de arriba sigue siendo solo clasificacion
+  y decision de necesidades. No pedirle al modelo que "confirme" que guardo
+  datos ni que decida que persistir: esa escritura es determinista (todo lo
+  que llega se guarda), la parte que decide selectivamente que conservar
+  mas alla de la interaccion puntual sigue siendo Memoria, no este prompt.
 - El limite de iteraciones (cuantas veces Inteligencia puede rechazar el
   contexto y pedir otra vuelta) no esta definido por la spec original —
   hace falta fijar un tope duro en el orquestador para evitar un loop
