@@ -14,9 +14,38 @@ entorno, implementada como la coordinacion de componentes especializados
 
 ## 2. Componentes
 
-La entidad tiene cinco componentes. Tres son capas de pre/post-procesamiento
-alrededor de un componente central, mas un componente de persistencia
-transversal a todos.
+La entidad tiene seis componentes. Uno es un cortocircuito que corre antes
+que todo lo demas; tres son capas de pre/post-procesamiento alrededor de un
+componente central; uno es persistencia transversal a todos.
+
+### 2.0 Atajo semantico (fast path)
+
+**Fuente**: no forma parte de la spec 0.1.0.1-SK original — se agrego en
+conversacion, ver `docs/aw1s/planos/0.1.0.2-atajo-semantico.md`.
+
+**Responsabilidad**: interceptar el mensaje antes de que llegue a
+Inteligencia y resolverlo sin invocar ningun modelo cuando ya es un caso
+conocido (saludos, despedidas, agradecimientos, y otras frases que el
+sistema tiene memorizadas con una respuesta fija).
+
+**Mecanismo**: comparacion por similitud contra un vectorDB chico y
+curado — distinto del pgvector de Memoria (seccion 2.5): este indice no
+es el historial dinamico de conversaciones, es una lista acotada y
+mantenida a mano de pares frase→respuesta.
+
+**Salida**: si hay match por encima del umbral definido, la respuesta
+prearmada, sin pasar por Inteligencia, Procesamiento principal ni
+Humanizacion. Si no hay match, el mensaje sigue el flujo normal completo
+(seccion 4).
+
+**Por que existe**: mitigar el costo operativo descrito en la seccion 7 —
+la mayoria del trafico conversacional real es trivial y no necesita
+clasificacion ni resolucion.
+
+**Riesgo a controlar**: un umbral mal calibrado puede hacer que un mensaje
+real matchee por una frase parecida (ej. "hola, tengo un problema urgente"
+contestado como si fuera solo "hola"). Ver puntos abiertos en el plano de
+origen.
 
 ### 2.1 Inteligencia
 
@@ -127,6 +156,9 @@ sistema en produccion con su propio ciclo de cambios.
 
 ```
 Entrada
+  → Atajo semantico: compara contra el indice de frases conocidas
+        → match fuerte: responde directo con lo prearmado. FIN, sin LLM.
+        → sin match: continua
   → Inteligencia: analiza y clasifica
   → Inteligencia: determina necesidad de informacion
   → Contexto: recupera (Postgres / pgvector / ambos)
@@ -167,6 +199,11 @@ principal resolviendo), tres si Humanizacion tambien es un paso generativo
 separado — contra una unica llamada en la arquitectura actual de AW1
 (`backend/src/aw1/chat/service.py`). Cualquier decision de que proveedor/
 modelo corre cada capa debe tomarse con ese costo adicional explicito.
+
+**Mitigacion definida**: el Atajo semantico (seccion 2.0) evita ese costo
+por completo para el subconjunto de mensajes que ya son casos conocidos —
+el costo de 2-3 llamadas por turno aplica solo a lo que el atajo no
+resuelve.
 
 ## 8. Pendiente de la spec (no resuelto por este documento)
 

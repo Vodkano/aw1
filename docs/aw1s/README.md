@@ -23,7 +23,13 @@ y como (o si) se conecta con lo que ya existe.
 
 ```mermaid
 flowchart TB
-    U[Usuario / input] --> I
+    U[Usuario / input] --> A
+
+    A{"Atajo semantico\n¿match en indice\nde frases conocidas?"}
+    A -- "match fuerte" --> RC["Respuesta prearmada\n(sin LLM)"]
+    RC --> R[Respuesta al usuario]
+
+    A -- "sin match" --> I
 
     subgraph ENTIDAD["Entidad AW1S"]
         direction TB
@@ -38,13 +44,20 @@ flowchart TB
         P -- "resultado interno" --> H
     end
 
-    H --> R[Respuesta al usuario]
+    H --> R
 
     C <--> M[(Memoria\nPostgres + pgvector)]
     P -.->|"guarda resultado\nrelevante"| M
+    A -.->|"indice curado,\ndistinto de Memoria"| VC[(Indice de frases\nconocidas)]
 
     style ENTIDAD fill:transparent,stroke:#888,stroke-dasharray: 4 3
 ```
+
+El atajo semantico es un cortocircuito: si hay match fuerte contra un
+indice chico y curado de frases ya conocidas (saludos, despedidas, etc.),
+se responde directo sin llamar a ningun modelo. Solo cuando no hay match
+entra la Entidad completa. Detalle en
+`documentacion/arquitectura.md#20-atajo-semantico-fast-path`.
 
 **Por que el ciclo entre Inteligencia y Contexto es ida y vuelta**: el
 documento original permite que Inteligencia rechace lo recuperado y pida
