@@ -1,0 +1,334 @@
+# AW1S — Documentacion de arquitectura
+
+Version: 0.1.0.1-SK (primer documento fuente procesado). Estado: los 5
+componentes de procesamiento/generacion tienen codigo real y
+encadenado (`aw1s/src/aw1s/entidad/procesar_mensaje()`), servido por HTTP
+(`aw1s/src/aw1s/servidor/`, ver seccion 4). Falta el componente Memoria
+(ver seccion 8) y decidir la relacion con AW1 v3.
+Fuente: spec entregada por el usuario, ver
+`docs/aw1s/planos/0.1.0.1-SK.md` para el analisis linea a linea y los
+puntos que la spec deja abiertos.
+
+## 1. Definicion
+
+AW1S es una entidad computacional inteligente: una unidad autonoma con
+identidad, estado, memoria, capacidades y mecanismos de interaccion con su
+entorno, implementada como la coordinacion de componentes especializados
+(no un unico modelo).
+
+## 2. Componentes
+
+La entidad tiene seis componentes. Uno es un cortocircuito que corre antes
+que todo lo demas; tres son capas de pre/post-procesamiento alrededor de un
+componente central; uno es persistencia transversal a todos.
+
+### 2.0 Atajo semantico (fast path)
+
+**Fuente**: no forma parte de la spec 0.1.0.1-SK original — se agrego en
+conversacion, ver `docs/aw1s/planos/0.1.0.2-atajo-semantico.md`.
+
+**Responsabilidad**: interceptar el mensaje antes de que llegue a
+Inteligencia y resolverlo sin invocar ningun modelo cuando ya es un caso
+conocido (saludos, despedidas, agradecimientos, y otras frases que el
+sistema tiene memorizadas con una respuesta fija).
+
+**Mecanismo**: comparacion por similitud contra un vectorDB chico y
+curado — distinto del pgvector de Memoria (seccion 2.5): este indice no
+es el historial dinamico de conversaciones, es una lista acotada y
+mantenida a mano de pares frase→respuesta.
+
+**Calibracion (v1)**, en tres pasos, del mas barato al mas caro — se sale
+apenas uno autoriza o descarta:
+1. Filtro de longitud: mensajes de mas de 6 palabras / 40 caracteres no se
+   evaluan, van directo al flujo completo.
+2. Match exacto normalizado (minusculas, sin tildes/puntuacion) contra el
+   indice: autoriza directo si matchea 1:1.
+3. Similitud coseno por embedding: ≥0.93 autoriza; 0.85–0.93 no autoriza
+   pero se loguea como casi-match para revisar el indice; <0.85 no
+   autoriza.
+
+**Implementado**: `aw1s/src/aw1s/atajo_semantico/` completo, con backend
+real del indice sobre Postgres (`IndiceFrasesConocidasPostgres`, tabla
+`frases_conocidas`) ademas de la version en memoria. Verificado contra
+Postgres real — encontro y corrigio un bug real: la tabla es chica y
+curada a mano a proposito (no crece como `memorias`/`embeddings`), y un
+indice `ivfflat` (busqueda aproximada) sobre pocas filas puede devolver
+CERO resultados para un vector fuera de la distribucion de los datos
+cargados, en vez del mas cercano. `frases_conocidas` no lleva indice
+vectorial -busqueda secuencial exacta, rapida de sobra a este tamano.
+
+Ademas, con sesion activa (interaccion previa reciente sin resolver) el
+atajo no se aplica salvo que la entrada matcheada sea de categoria
+"despedida". Los valores numericos son punto de partida, se ajustan con
+datos reales una vez que haya trafico. Detalle completo en
+`planos/0.1.0.2-atajo-semantico.md`, seccion "Calibracion (v1)".
+
+Este listado por si solo ya resuelve el caso de riesgo que motivo la
+calibracion: "hola, tengo un problema urgente" tiene 8 palabras, se
+descarta en el paso 1 (filtro de longitud) sin necesidad de calcular
+ningun score.
+
+**Salida**: si hay match autorizado, la respuesta prearmada, sin pasar por
+Inteligencia, Procesamiento principal ni Humanizacion. Si no hay match, el
+mensaje sigue el flujo normal completo (seccion 4).
+
+**Por que existe**: mitigar el costo operativo descrito en la seccion 7 —
+la mayoria del trafico conversacional real es trivial y no necesita
+clasificacion ni resolucion.
+
+### 2.1 Inteligencia
+
+**Responsabilidad**: analizar la entrada antes de que llegue al
+procesamiento principal. Clasifica el problema y determina que informacion
+hace falta para resolverlo. Ademas, recopila y persiste los datos del
+usuario/interaccion en la base de datos — ver "Persistencia" mas abajo.
+
+**Implementado**: `aw1s/src/aw1s/inteligencia/` — `analizar()` hace la
+persistencia y llama a un `ClienteLLM` (protocolo) con el prompt de
+`docs/aw1s/prompts/inteligencia.md`. Logica de orquestacion y parseo
+probadas; el cliente de Ollama en si validado solo contra mocks del
+contrato HTTP, no contra un Ollama real todavia (ver `aw1s/README.md`).
+
+**Entrada**:
+- Mensaje/input del usuario
+- Contexto disponible en el momento
+- Historial relevante
+- Metadata de la interaccion: hora, fecha, IP (si corresponde y es
+  legitimo obtenerla), ID de usuario (si existe), ID de sesion, otros datos
+  tecnicos del input
+- En iteraciones posteriores a la primera: el resultado de la recuperacion
+  anterior hecha por Contexto, para evaluar si alcanza
+
+**Salida**: una decision estructurada que especifica que informacion se
+necesita, donde buscarla (Postgres, pgvector, o ambos), que tan relevante
+es, cuanta recuperar, y si la interaccion actual amerita usar memoria de
+sesion, memoria semantica, o combinar fuentes.
+
+**Persistencia** (fuente: `planos/0.1.0.3-inteligencia-recoleccion-datos.md`,
+aporte en conversacion, no parte de la spec 0.1.0.1-SK original):
+Inteligencia no es un componente de solo lectura — ademas de clasificar,
+escribe en Postgres las entidades estructuradas de la interaccion (Usuario,
+Sesion, Interaccion, Evento) apenas las recibe, temprano en el ciclo. Esto
+es distinto de lo que hace Memoria (seccion 2.5), que decide al **cierre**
+del ciclo que se eleva a Memoria semantica y se vectoriza. Alcance de "todos
+los datos del usuario" y su politica de retencion: sin definir todavia, ver
+puntos abiertos en el plano de origen — es una decision de producto/
+privacidad, no solo de arquitectura.
+
+**Regla de control**: puede iterar. Si evalua que la informacion
+recuperada por Contexto no alcanza, vuelve a emitir una necesidad de
+informacion en vez de dejar pasar el problema con datos insuficientes.
+
+### 2.2 Contexto
+
+**Responsabilidad**: ejecutar lo que Inteligencia determino que hace falta.
+Recupera, filtra y organiza informacion desde Memoria. No decide que se
+necesita — esa decision es exclusiva de Inteligencia.
+
+**Entrada**: la necesidad de informacion estructurada emitida por
+Inteligencia.
+
+**Salida**: el contexto ya armado y organizado, listo para entregar al
+procesamiento principal.
+
+**Mecanismo de recuperacion**: PostgreSQL para informacion estructurada,
+pgvector para informacion recuperable por significado, o ambos combinados
+segun lo que haya pedido Inteligencia.
+
+**Implementado**: `aw1s/src/aw1s/contexto/` — `construir_contexto()`
+ejecuta cada `Necesidad` sin decidir nada por su cuenta, persiste el
+resultado via `guardar_contexto`. Verificado contra Postgres real.
+
+### 2.3 Procesamiento principal
+
+**Responsabilidad**: resolver el problema identificado.
+
+**Entrada**: consulta del usuario + instrucciones + el contexto ya armado
+por la capa de Contexto. **Nunca** recibe la memoria completa ni toda la
+informacion disponible — solo lo que las capas anteriores seleccionaron.
+
+**Salida**: un resultado interno (la resolucion del problema, antes de
+adaptarse a una respuesta conversacional).
+
+**Implementado**: `aw1s/src/aw1s/procesamiento_principal/` — `resolver()`.
+Prompt propio (`docs/aw1s/prompts/procesamiento_principal.md`), no
+formaba parte de la spec original, se agrego durante la implementacion.
+Stateless -no persiste nada. Cliente de Ollama validado solo contra
+mocks del contrato HTTP, no contra un Ollama real (mismo limite que
+Inteligencia, ver `aw1s/README.md`).
+
+### 2.4 Humanizacion
+
+**Responsabilidad**: convertir el resultado interno en una respuesta
+coherente con el contexto de la interaccion.
+
+**Entrada**: el resultado interno del procesamiento principal.
+
+**Salida**: la respuesta final, tal como la recibe el usuario.
+
+**Restriccion**: no modifica la decision ni el razonamiento producido por
+el procesamiento principal — solo su forma de presentacion.
+
+**Implementado**: `aw1s/src/aw1s/humanizacion/` — `humanizar()`. Stateless,
+mismo patron que Procesamiento principal. Cliente de Ollama validado solo
+contra mocks del contrato HTTP (mismo limite que el resto, ver
+`aw1s/README.md`).
+
+### 2.5 Memoria
+
+**Responsabilidad**: decidir que se conserva mas alla de la interaccion
+puntual y persistirlo como Memoria semantica. Los datos crudos de la
+interaccion (Usuario, Sesion, Interaccion, Evento) ya quedaron escritos por
+Inteligencia al principio del ciclo (seccion 2.1) — Memoria trabaja sobre
+lo que ya existe, no repite esa escritura.
+
+**Arquitectura**: hibrida, sobre una unica infraestructura.
+- **PostgreSQL**: fuente de verdad. Todo dato persistente (usuarios,
+  sesiones, interacciones, mensajes, contexto, metadata, eventos, estados,
+  relaciones, memorias) existe originalmente ahi.
+- **pgvector**: extension de PostgreSQL, no una base separada. Almacena
+  embeddings para recuperacion por similitud semantica.
+
+**Regla de prioridad**: el dato original en PostgreSQL siempre tiene
+prioridad sobre su embedding. El embedding es un mecanismo de recuperacion,
+nunca reemplaza al contenido original.
+
+**Regla de cobertura**: no toda la informacion se vectoriza. Los
+identificadores, timestamps, estados, relaciones, metadata y
+clasificaciones quedan solo en PostgreSQL. Solo se generan embeddings para
+contenido cuyo significado puede ser relevante para busquedas semanticas
+futuras (memorias, contexto, historial relevante).
+
+## 3. Modelo de datos
+
+Siete entidades, relacionadas por identificadores:
+
+| Entidad | Relacion | Notas |
+|---|---|---|
+| Usuario | 1—N Sesion | Identificacion opcional: no toda interaccion tiene usuario identificable. |
+| Sesion | 1—N Interaccion | Agrupa interacciones de una misma sesion. |
+| Interaccion | 1—1 Contexto, 1—N Memoria | Una entrada + su procesamiento. |
+| Contexto | N—1 Interaccion | Informacion contextual de esa interaccion puntual. |
+| Memoria | N—1 Interaccion, 1—0/1 Embedding | Lo que AW1S decide conservar mas alla de la interaccion. |
+| Embedding | 1—1 Memoria (u otro registro) | Representacion vectorial; referencia siempre al original por ID. |
+| Evento | N—1 Interaccion (opcional) | Acciones/acontecimientos del sistema, no de la conversacion. |
+
+Este modelo es conceptual — no hay todavia tipos de columna, indices ni
+constraints. No debe confundirse ni fusionarse con el schema real de AW1 v3
+(`backend/src/aw1/db/schema.sql` / `schema_postgres.sql`), que es un
+sistema en produccion con su propio ciclo de cambios.
+
+**Implementado**: `aw1s/src/aw1s/db/schema.sql` baja este modelo a tablas
+Postgres+pgvector reales, y `aw1s/src/aw1s/almacenamiento/` es la capa de
+persistencia sobre ese schema (protocolo `RepositorioAlmacenamiento` +
+implementacion `RepositorioPostgres`). Verificado contra un Postgres+pgvector
+real, con dos bugs reales encontrados y arreglados en el proceso -ver
+`aw1s/README.md`.
+
+## 4. Flujo de una interaccion
+
+```
+Entrada
+  → Atajo semantico: compara contra el indice de frases conocidas
+        → match fuerte: responde directo con lo prearmado. FIN, sin LLM.
+        → sin match: continua
+  → Inteligencia: analiza y clasifica
+  → Inteligencia: persiste Usuario / Sesion / Interaccion / Evento en Postgres
+  → Inteligencia: determina necesidad de informacion
+  → Contexto: recupera (Postgres / pgvector / ambos)
+  → Inteligencia: evalua si alcanza
+        → si no alcanza: vuelve a "determina necesidad de informacion"
+        → si alcanza: continua
+  → Contexto: construye el contexto final
+  → Procesamiento principal: resuelve
+  → Humanizacion: redacta la respuesta
+  → Memoria: almacena resultado; genera embeddings donde corresponda
+```
+
+**Implementado**: `aw1s/src/aw1s/entidad/procesar_mensaje()` encadena este
+flujo hasta Humanizacion inclusive (Memoria queda afuera a proposito, ver
+seccion 8). El tramo "recupera / evalua / vuelve a determinar" es un ciclo
+real con tope duro (`limite_iteraciones`, default 3 -numero de partida
+propio, la spec no lo define) para no loopear infinito si el modelo nunca
+marca `listo_para_procesar: true`. Solo la ronda final del ciclo persiste
+una fila de Contexto -las rondas intermedias ("Contexto: recupera") no
+dejan rastro en la base, mismo criterio que distingue "recupera" de
+"construye el contexto final" en el diagrama de arriba. Verificado contra
+Postgres real (una interaccion + un contexto por ciclo, sin importar
+cuantas rondas de reevaluacion hicieron falta).
+
+**Implementado (servidor HTTP)**: `aw1s/src/aw1s/servidor/` expone
+`procesar_mensaje()` como `POST /api/mensaje` (FastAPI + uvicorn, `python -m
+aw1s`). No le agrega logica a la Entidad, solo la conecta a Postgres/Ollama
+reales y valida la entrada. Sin autenticacion todavia -pensado para
+localhost/red interna, no para exponerse directo a internet (ver punto
+pendiente #4: si esto termina desplegado junto a AW1 v3, probablemente
+convenga reusar el esquema de auth de `backend/src/aw1/api/security.py` en
+vez de inventar uno nuevo). Verificado con el servidor real corriendo contra
+Postgres real (arranque, `/healthz`, y `/api/mensaje` devolviendo 502 de
+forma prolija cuando Ollama no esta disponible, en vez de un error sin
+manejar) -no se pudo probar el ciclo generativo completo en vivo por la
+misma razon que `llm/ollama.py` (sin acceso a Ollama en el entorno donde se
+escribio, ver seccion 8/README).
+
+## 5. Principio de diseno
+
+> "El modelo recibe lo que necesita, no todo lo que existe."
+
+Este es el criterio que distingue a AW1S de un sistema que envia todo el
+historial/memoria disponible a un LLM y confia en que el modelo filtre. En
+AW1S el filtrado es un paso previo y explicito, responsabilidad de
+Inteligencia + Contexto — el procesamiento principal nunca ve la memoria
+cruda.
+
+## 6. Limites de responsabilidad (no relajar sin redefinir la spec)
+
+- Inteligencia decide **que** informacion hace falta. Contexto no toma esa
+  decision, solo la ejecuta.
+- Procesamiento principal no elige que informacion usar — la recibe ya
+  filtrada.
+- Humanizacion no altera el razonamiento ni la decision — solo la forma.
+- Memoria participa activamente al cierre de cada ciclo (que guardar, que
+  vectorizar) — no es un cache pasivo.
+
+## 7. Costo operativo (implicancia practica, no parte de la spec original)
+
+Un ciclo completo implica como minimo dos llamadas a un modelo de lenguaje
+por turno de conversacion (Inteligencia clasificando + Procesamiento
+principal resolviendo), tres si Humanizacion tambien es un paso generativo
+separado — contra una unica llamada en la arquitectura actual de AW1
+(`backend/src/aw1/chat/service.py`). Cualquier decision de que proveedor/
+modelo corre cada capa debe tomarse con ese costo adicional explicito.
+
+**Mitigacion definida**: el Atajo semantico (seccion 2.0) evita ese costo
+por completo para el subconjunto de mensajes que ya son casos conocidos —
+el costo de 2-3 llamadas por turno aplica solo a lo que el atajo no
+resuelve.
+
+## 8. Pendiente de la spec (no resuelto por este documento)
+
+1. Metodo de entrenamiento/construccion del componente de Inteligencia.
+2. Regla o heuristica para decidir que interaccion se convierte en Memoria.
+3. Enumeracion completa de "otros datos tecnicos del input" que Inteligencia
+   puede recibir.
+4. Relacion entre AW1S y el AW1 actual: sistema nuevo, reemplazo de
+   `chat/service.py`, o ejecucion en paralelo.
+5. ~~Umbral de similitud del Atajo semantico~~ — resuelto v1 en seccion
+   2.0 / `planos/0.1.0.2-atajo-semantico.md`. Sigue abierto: como se
+   puebla/curan el indice (alta de entradas nuevas) y el limite exacto de
+   "reciente" para la regla de sesion activa.
+6. Alcance exacto de "todos los datos del usuario" que Inteligencia
+   persiste, y su politica de retencion — decision de producto/privacidad,
+   no solo tecnica (seccion 2.1).
+7. `limite_iteraciones` del orquestador (`aw1s/src/aw1s/entidad/`): 3 por
+   defecto, valor de partida sin medir contra uso real.
+8. El componente Memoria en si (que interaccion se conserva como memoria
+   semantica, cuando se genera su embedding) — sin implementar. El
+   orquestador (`entidad/procesar_mensaje()`) llega hasta Humanizacion y
+   se detiene ahi a proposito, en vez de asumir una politica (ej. "guardar
+   siempre") que nadie definio.
+9. Relacion entre el `identificador_externo`/`sesion_id` del orquestador y
+   los IDs que ya usa AW1 v3 (ej. chat_id de Telegram) — no definida,
+   depende del punto 4.
+
+Se actualiza este documento a medida que lleguen mas fuentes.
