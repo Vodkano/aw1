@@ -108,6 +108,15 @@ implementado, que sigue, como correr sus tests (`.venv` propio, no el de
   cruda). Stateless, no persiste nada. Prompt propio en
   `docs/aw1s/prompts/procesamiento_principal.md` (no formaba parte de la
   spec original -se agrego durante la implementacion).
+- **Humanizacion** (`aw1s/src/aw1s/humanizacion/`) — convierte el
+  resultado interno en la respuesta final, sin cambiar la decision.
+  Stateless, mismo patron que Procesamiento principal. Prompt ya escrito
+  en `docs/aw1s/prompts/humanizacion.md` (este si formaba parte de la
+  spec original).
+
+Falta encadenar estos componentes en un solo orquestador (hoy son piezas
+sueltas, cada una con sus propios tests) -no asumir que ya existe un
+"main loop" en algun lado de `aw1s/` hasta que se implemente.
 
 Puntos que Copilot tiene que respetar si se empieza a implementar algo de
 esto:

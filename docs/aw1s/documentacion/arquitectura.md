@@ -155,6 +155,11 @@ coherente con el contexto de la interaccion.
 **Restriccion**: no modifica la decision ni el razonamiento producido por
 el procesamiento principal — solo su forma de presentacion.
 
+**Implementado**: `aw1s/src/aw1s/humanizacion/` — `humanizar()`. Stateless,
+mismo patron que Procesamiento principal. Cliente de Ollama validado solo
+contra mocks del contrato HTTP (mismo limite que el resto, ver
+`aw1s/README.md`).
+
 ### 2.5 Memoria
 
 **Responsabilidad**: decidir que se conserva mas alla de la interaccion

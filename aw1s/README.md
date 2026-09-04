@@ -130,6 +130,16 @@ reales que la version anterior (nunca probada) tenia:
     prompt base (pensado para personalidad/alcance por agente mas
     adelante, mismo patron que ya usa AW1 v3 por bot de Telegram).
   - `modelos.py` — `ResultadoProcesamiento`.
+- `src/aw1s/humanizacion/` — convierte el resultado interno en la
+  respuesta final, sin cambiar la decision (nunca resuelve nada de nuevo).
+  Mismo patron que Procesamiento principal: stateless, `GeneradorTexto`,
+  prompt ya escrito en `docs/aw1s/prompts/humanizacion.md` (este si
+  formaba parte de la spec original, copiado literal en
+  `humanizacion/prompt.py`).
+  - `humanizacion.py` — `humanizar()`: recibe el resultado interno + la
+    consulta original + historial breve opcional + canal opcional
+    (chat web, Telegram, etc. -por si cambia el formato esperado).
+  - `modelos.py` — `ResultadoHumanizacion`.
 
 Nada de esto esta conectado a un servidor HTTP todavia — son funciones
 puras + clientes de Ollama/Postgres, pensadas para poder probarse y usarse
@@ -145,17 +155,14 @@ desde cualquier lado.
 2. Backend real del indice del Atajo semantico sobre Postgres (implementar
    `IndiceFrasesConocidas` con una tabla, en vez de `IndiceEnMemoria`) —
    ya existe la infraestructura de Postgres+pgvector, es un paso chico.
-3. Humanizacion: el prompt ya esta escrito
-   (`docs/aw1s/prompts/humanizacion.md`), falta el codigo -mismo patron
-   que Procesamiento principal (`GeneradorTexto`, sin persistencia).
-4. El ciclo completo: encadenar Atajo semantico → Inteligencia → Contexto
+3. El ciclo completo: encadenar Atajo semantico → Inteligencia → Contexto
    → Procesamiento principal → Humanizacion → Memoria en un solo
    orquestador. Si `listo_para_procesar` es `false`, volver a llamar a
    Inteligencia con `contexto_recuperado` (el `ContextoArmado` que ya
    arma Contexto) -el limite de iteraciones para evitar un loop infinito
    sigue sin definir (ver nota en `docs/aw1s/prompts/inteligencia.md`).
-5. El componente Memoria en si: decidir que interaccion se conserva como
+4. El componente Memoria en si: decidir que interaccion se conserva como
    memoria semantica y generar su embedding -sigue sin regla definida
    (ver punto pendiente en `documentacion/arquitectura.md#8`).
-6. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
+5. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
    documentacion) con datos reales de por medio, no en abstracto.
