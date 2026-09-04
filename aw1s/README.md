@@ -97,6 +97,20 @@ reales que la version anterior (nunca probada) tenia:
     forma de la respuesta. Si el LLM devuelve algo mal formado, la
     interaccion ya persistida no se pierde -se propaga
     `DecisionInvalidaError` para que el llamador decida como seguir.
+- `src/aw1s/contexto/` — ejecuta las `Necesidad` que decidio Inteligencia,
+  sin decidir nada por su cuenta (ver
+  `docs/aw1s/documentacion/arquitectura.md#22-contexto`).
+  - `contexto.py` — `construir_contexto()`: por cada necesidad, segun
+    `fuente` (`postgres`/`pgvector`/`ambas`) y las banderas
+    `usa_historial_sesion`/`usa_memoria_semantica`, trae historial de
+    sesion (`repositorio.interacciones_recientes`) y/o memoria semantica
+    (vectoriza `terminos_busqueda_semantica` con el mismo
+    `EmbeddingsProvider` del Atajo semantico, despues
+    `repositorio.buscar_memorias_similares`). Persiste el resultado via
+    `repositorio.guardar_contexto`. **Verificado contra Postgres real**
+    (incluida la columna JSONB con contenido anidado, no solo el caso
+    chico de `verificar_schema.py`) ademas de los tests con Fakes.
+  - `modelos.py` — `ContextoArmado` / `ResultadoBusqueda`.
 
 Nada de esto esta conectado a un servidor HTTP todavia — son funciones
 puras + clientes de Ollama/Postgres, pensadas para poder probarse y usarse
@@ -112,12 +126,11 @@ desde cualquier lado.
 2. Backend real del indice del Atajo semantico sobre Postgres (implementar
    `IndiceFrasesConocidas` con una tabla, en vez de `IndiceEnMemoria`) —
    ya existe la infraestructura de Postgres+pgvector, es un paso chico.
-3. Contexto: recuperacion desde `RepositorioAlmacenamiento` segun lo que
-   pida cada `Necesidad` de la decision de Inteligencia.
-4. Procesamiento principal + Humanizacion.
-5. El ciclo completo: si `listo_para_procesar` es `false`, volver a llamar
-   a Inteligencia con `contexto_recuperado` -el limite de iteraciones para
-   evitar un loop infinito sigue sin definir (ver nota en
+3. Procesamiento principal + Humanizacion.
+4. El ciclo completo: si `listo_para_procesar` es `false`, volver a llamar
+   a Inteligencia con `contexto_recuperado` (el `ContextoArmado` que ya
+   arma este modulo) -el limite de iteraciones para evitar un loop
+   infinito sigue sin definir (ver nota en
    `docs/aw1s/prompts/inteligencia.md`).
-6. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
+5. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
    documentacion) con datos reales de por medio, no en abstracto.

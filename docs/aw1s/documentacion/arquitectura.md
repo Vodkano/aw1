@@ -121,6 +121,10 @@ procesamiento principal.
 pgvector para informacion recuperable por significado, o ambos combinados
 segun lo que haya pedido Inteligencia.
 
+**Implementado**: `aw1s/src/aw1s/contexto/` — `construir_contexto()`
+ejecuta cada `Necesidad` sin decidir nada por su cuenta, persiste el
+resultado via `guardar_contexto`. Verificado contra Postgres real.
+
 ### 2.3 Procesamiento principal
 
 **Responsabilidad**: resolver el problema identificado.

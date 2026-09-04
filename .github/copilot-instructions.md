@@ -94,6 +94,10 @@ implementado, que sigue, como correr sus tests (`.venv` propio, no el de
   ollama.com en el entorno donde se escribio) -si hay acceso a internet
   disponible, correrlo contra un Ollama real es el siguiente paso
   pendiente antes de confiar del todo en `cliente_llm.py`.
+- **Contexto** (`aw1s/src/aw1s/contexto/`) — ejecuta las `Necesidad` que
+  arma Inteligencia (no decide nada por su cuenta, ver
+  arquitectura.md#22-contexto), persiste el resultado. **Verificado**
+  contra Postgres real (incluida la columna JSONB con contenido anidado).
 
 Puntos que Copilot tiene que respetar si se empieza a implementar algo de
 esto:
