@@ -15,7 +15,7 @@ from aw1s.almacenamiento.modelos import (
     Usuario,
 )
 from aw1s.atajo_semantico.embeddings import similitud_coseno
-from aw1s.inteligencia.cliente_llm import ClienteLLMError
+from aw1s.llm.ollama import ClienteLLMError
 
 
 class FakeClienteLLM:
@@ -43,6 +43,24 @@ class FakeClienteLLM:
         if self.respuestas is None:
             raise ClienteLLMError("FakeClienteLLM sin respuesta configurada.")
         return self.respuestas
+
+
+class FakeGeneradorTexto:
+    """Mismo espiritu que FakeClienteLLM pero para GeneradorTexto
+    (Procesamiento principal) -- respuesta de texto libre, no JSON."""
+
+    def __init__(self, respuesta: str | None = None, *, lanza: Exception | None = None) -> None:
+        self.respuesta = respuesta
+        self.lanza = lanza
+        self.llamadas: list[dict[str, str]] = []
+
+    async def generar_texto(self, *, system: str, mensaje: str) -> str:
+        self.llamadas.append({"system": system, "mensaje": mensaje})
+        if self.lanza is not None:
+            raise self.lanza
+        if self.respuesta is None:
+            raise ClienteLLMError("FakeGeneradorTexto sin respuesta configurada.")
+        return self.respuesta
 
 
 class FakeEmbeddings:

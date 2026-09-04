@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from aw1s.inteligencia.cliente_llm import ClienteLLMError, OllamaChatClient
+from aw1s.llm.ollama import ClienteLLMError, OllamaChatClient
 
 
 def _respuesta_ollama(contenido: str) -> MagicMock:
@@ -74,3 +74,34 @@ async def test_generar_json_lanza_si_el_contenido_no_es_json() -> None:
         new=AsyncMock(return_value=_respuesta_ollama("esto no es json")),
     ), pytest.raises(ClienteLLMError):
         await cliente.generar_json(system="sistema", mensaje="hola")
+
+
+# -- generar_texto (Procesamiento principal) ----------------------------------
+
+
+async def test_generar_texto_devuelve_el_contenido_sin_formato_json() -> None:
+    cliente = OllamaChatClient("http://127.0.0.1:11434")
+    mock_post = AsyncMock(return_value=_respuesta_ollama("  la respuesta es 42  "))
+    with patch("httpx.AsyncClient.post", new=mock_post):
+        resultado = await cliente.generar_texto(system="sistema", mensaje="hola")
+
+    assert resultado == "la respuesta es 42"
+    _, kwargs = mock_post.call_args
+    assert "format" not in kwargs["json"]
+
+
+async def test_generar_texto_lanza_si_la_respuesta_esta_vacia() -> None:
+    cliente = OllamaChatClient("http://127.0.0.1:11434")
+    with patch(
+        "httpx.AsyncClient.post", new=AsyncMock(return_value=_respuesta_ollama("   "))
+    ), pytest.raises(ClienteLLMError):
+        await cliente.generar_texto(system="sistema", mensaje="hola")
+
+
+async def test_generar_texto_lanza_si_ollama_no_responde() -> None:
+    cliente = OllamaChatClient("http://127.0.0.1:11434")
+    with patch(
+        "httpx.AsyncClient.post",
+        new=AsyncMock(side_effect=httpx.ConnectError("no se pudo conectar")),
+    ), pytest.raises(ClienteLLMError):
+        await cliente.generar_texto(system="sistema", mensaje="hola")

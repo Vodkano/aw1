@@ -136,6 +136,13 @@ informacion disponible — solo lo que las capas anteriores seleccionaron.
 **Salida**: un resultado interno (la resolucion del problema, antes de
 adaptarse a una respuesta conversacional).
 
+**Implementado**: `aw1s/src/aw1s/procesamiento_principal/` — `resolver()`.
+Prompt propio (`docs/aw1s/prompts/procesamiento_principal.md`), no
+formaba parte de la spec original, se agrego durante la implementacion.
+Stateless -no persiste nada. Cliente de Ollama validado solo contra
+mocks del contrato HTTP, no contra un Ollama real (mismo limite que
+Inteligencia, ver `aw1s/README.md`).
+
 ### 2.4 Humanizacion
 
 **Responsabilidad**: convertir el resultado interno en una respuesta

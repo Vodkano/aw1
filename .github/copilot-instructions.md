@@ -86,18 +86,28 @@ implementado, que sigue, como correr sus tests (`.venv` propio, no el de
   arreglaron dos bugs reales al probarlo -no asumir que un cambio nuevo
   aca esta bien solo porque los tests con Fakes pasan: correr ese script
   de nuevo despues de tocar `almacenamiento/postgres.py` o `db/schema.sql`.
+- **`aw1s/src/aw1s/llm/ollama.py`** — cliente Ollama compartido entre
+  Inteligencia y Procesamiento principal (protocolos angostos
+  `GeneradorJSON`/`GeneradorTexto`, duck typing, sin que ninguno de los
+  dos paquetes dependa del otro). Validado solo contra mocks del contrato
+  HTTP, no contra un Ollama real (bloqueado el acceso a ollama.com en el
+  entorno donde se escribio) -si hay acceso a internet disponible,
+  correrlo contra un Ollama real es el paso pendiente antes de confiar
+  del todo en este archivo. Nunca agregar un cliente Ollama nuevo en otro
+  lado del paquete: todo lo que hable con Ollama pasa por aca.
 - **Inteligencia** (`aw1s/src/aw1s/inteligencia/`) — persistencia +
   llamada al LLM (prompt en `docs/aw1s/prompts/inteligencia.md`, copiado
   literal en `inteligencia/prompt.py` -mantener los dos sincronizados a
-  mano). El cliente de Ollama esta validado solo contra mocks del
-  contrato HTTP, no contra un Ollama real (bloqueado el acceso a
-  ollama.com en el entorno donde se escribio) -si hay acceso a internet
-  disponible, correrlo contra un Ollama real es el siguiente paso
-  pendiente antes de confiar del todo en `cliente_llm.py`.
+  mano).
 - **Contexto** (`aw1s/src/aw1s/contexto/`) — ejecuta las `Necesidad` que
   arma Inteligencia (no decide nada por su cuenta, ver
   arquitectura.md#22-contexto), persiste el resultado. **Verificado**
   contra Postgres real (incluida la columna JSONB con contenido anidado).
+- **Procesamiento principal** (`aw1s/src/aw1s/procesamiento_principal/`)
+  — resuelve con SOLO la consulta + el `ContextoArmado` (nunca memoria
+  cruda). Stateless, no persiste nada. Prompt propio en
+  `docs/aw1s/prompts/procesamiento_principal.md` (no formaba parte de la
+  spec original -se agrego durante la implementacion).
 
 Puntos que Copilot tiene que respetar si se empieza a implementar algo de
 esto:
