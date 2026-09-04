@@ -15,6 +15,34 @@ from aw1s.almacenamiento.modelos import (
     Usuario,
 )
 from aw1s.atajo_semantico.embeddings import similitud_coseno
+from aw1s.inteligencia.cliente_llm import ClienteLLMError
+
+
+class FakeClienteLLM:
+    """``respuestas``: un dict (siempre la misma respuesta) o una lista
+    (una por llamada, en orden -- para probar el ciclo de Inteligencia
+    pidiendo otra vuelta). ``lanza``: si se da, la proxima llamada lanza
+    eso en vez de devolver una respuesta."""
+
+    def __init__(
+        self,
+        respuestas: dict | list[dict] | None = None,
+        *,
+        lanza: Exception | None = None,
+    ) -> None:
+        self.respuestas = respuestas
+        self.lanza = lanza
+        self.llamadas: list[dict[str, str]] = []
+
+    async def generar_json(self, *, system: str, mensaje: str) -> dict:
+        self.llamadas.append({"system": system, "mensaje": mensaje})
+        if self.lanza is not None:
+            raise self.lanza
+        if isinstance(self.respuestas, list):
+            return self.respuestas[len(self.llamadas) - 1]
+        if self.respuestas is None:
+            raise ClienteLLMError("FakeClienteLLM sin respuesta configurada.")
+        return self.respuestas
 
 
 class FakeEmbeddings:

@@ -73,11 +73,30 @@ reales que la version anterior (nunca probada) tenia:
     (Memoria/Embedding) — es una sola capa de almacenamiento fisico para
     dos responsabilidades distintas de la arquitectura.
   - `postgres.py` — `RepositorioPostgres`, implementacion real via
-    asyncpg + pgvector-python. **No probada contra Postgres real todavia**,
-    ver seccion de arriba.
+    asyncpg + pgvector-python. **Verificada contra Postgres+pgvector real**
+    (ver seccion de arriba) -- dos bugs reales encontrados y arreglados.
 - `tests/fakes.py` — `RepositorioEnMemoria`, el mismo protocolo sin
-  Postgres, para probar Inteligencia/Contexto/Memoria mas adelante sin
-  depender de una base real.
+  Postgres, y `FakeClienteLLM`, para probar Inteligencia/Contexto/Memoria
+  sin depender de una base ni de un modelo real.
+- `src/aw1s/inteligencia/` — primer componente generativo con codigo real.
+  - `prompt.py` — copia literal del system prompt de
+    `docs/aw1s/prompts/inteligencia.md` (los dos archivos hay que
+    mantenerlos sincronizados a mano, no hay generador).
+  - `cliente_llm.py` — `ClienteLLM` (protocolo) + `OllamaChatClient`
+    (`/api/chat` con `format: "json"`, modelo `mistral` por defecto -mismo
+    default que ya usa AW1 v3). **No se probo contra un Ollama real**
+    (bloqueado el acceso a ollama.com en el entorno donde se escribio, sin
+    paquete apt como alternativa) -se valido en cambio el contrato HTTP
+    real de Ollama con mocks (`tests/test_cliente_llm.py`), no es lo mismo
+    que probarlo en vivo.
+  - `modelos.py` — `DecisionInteligencia` y afines, tipados desde el JSON
+    del prompt.
+  - `inteligencia.py` — `analizar()`: persiste Usuario/Sesion/Interaccion/
+    Evento primero (plano 0.1.0.3, efecto de lado deterministico, no lo
+    decide el LLM), arma el historial breve, llama al modelo, valida la
+    forma de la respuesta. Si el LLM devuelve algo mal formado, la
+    interaccion ya persistida no se pierde -se propaga
+    `DecisionInvalidaError` para que el llamador decida como seguir.
 
 Nada de esto esta conectado a un servidor HTTP todavia — son funciones
 puras + clientes de Ollama/Postgres, pensadas para poder probarse y usarse
@@ -85,17 +104,20 @@ desde cualquier lado.
 
 ## Que falta (siguientes pasos, en orden sugerido)
 
-1. **Correr `scripts/verificar_schema.py` contra un Postgres+pgvector
-   real** para confirmar que el SQL de `almacenamiento/postgres.py` esta
-   bien — es lo unico de lo ya escrito que sigue sin verificar.
+1. **Probar `inteligencia/cliente_llm.py` contra un Ollama real** en
+   cuanto haya un entorno con acceso a internet para instalarlo -es lo
+   unico de lo ya escrito que sigue sin verificacion en vivo (la logica
+   de parseo/orquestacion si esta probada, contra mocks del contrato HTTP
+   y contra `RepositorioEnMemoria`).
 2. Backend real del indice del Atajo semantico sobre Postgres (implementar
    `IndiceFrasesConocidas` con una tabla, en vez de `IndiceEnMemoria`) —
-   ahora que ya existe la infraestructura de Postgres+pgvector, es un
-   paso chico.
-3. Inteligencia: integrar el prompt ya escrito en
-   `docs/aw1s/prompts/inteligencia.md` con un cliente LLM, escribiendo
-   sobre `RepositorioAlmacenamiento` (ya deberia alcanzar tal cual esta).
-4. Contexto: recuperacion desde `RepositorioAlmacenamiento`.
-5. Procesamiento principal + Humanizacion.
+   ya existe la infraestructura de Postgres+pgvector, es un paso chico.
+3. Contexto: recuperacion desde `RepositorioAlmacenamiento` segun lo que
+   pida cada `Necesidad` de la decision de Inteligencia.
+4. Procesamiento principal + Humanizacion.
+5. El ciclo completo: si `listo_para_procesar` es `false`, volver a llamar
+   a Inteligencia con `contexto_recuperado` -el limite de iteraciones para
+   evitar un loop infinito sigue sin definir (ver nota en
+   `docs/aw1s/prompts/inteligencia.md`).
 6. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
    documentacion) con datos reales de por medio, no en abstracto.

@@ -76,16 +76,24 @@ generativas.
 Codigo en `aw1s/` (raiz del repo, paquete Python propio, **no** dentro de
 `backend/`) — leer `aw1s/README.md` antes de tocar nada ahi: que esta
 implementado, que sigue, como correr sus tests (`.venv` propio, no el de
-`backend/`). Implementado hasta ahora: el Atajo semantico completo
-(`aw1s/src/aw1s/atajo_semantico/`, calibracion v1, verificado con tests) y
-el schema + capa de persistencia (`aw1s/src/aw1s/db/schema.sql` +
-`aw1s/src/aw1s/almacenamiento/`) — esta segunda parte usa Postgres+pgvector
-reales via asyncpg y **todavia no se probo contra una base real** (sin
-Docker disponible al escribirla). Antes de construir algo nuevo sobre
-`almacenamiento/postgres.py`, correr `aw1s/scripts/verificar_schema.py`
-contra un Postgres+pgvector real y arreglar lo que salga mal ahi primero
--no asumir que el SQL esta bien solo porque los tests con Fakes pasan (esos
-prueban la logica de orquestacion, no el SQL en si).
+`backend/`). Implementado hasta ahora:
+- **Atajo semantico** (`aw1s/src/aw1s/atajo_semantico/`) — calibracion v1
+  completa, verificada con tests.
+- **Schema + persistencia** (`aw1s/src/aw1s/db/schema.sql` +
+  `aw1s/src/aw1s/almacenamiento/`) — Postgres+pgvector real via asyncpg,
+  **ya verificado** contra una base real (`aw1s/scripts/verificar_schema.py`,
+  ver README para el procedimiento sin Docker). Aparecieron y se
+  arreglaron dos bugs reales al probarlo -no asumir que un cambio nuevo
+  aca esta bien solo porque los tests con Fakes pasan: correr ese script
+  de nuevo despues de tocar `almacenamiento/postgres.py` o `db/schema.sql`.
+- **Inteligencia** (`aw1s/src/aw1s/inteligencia/`) — persistencia +
+  llamada al LLM (prompt en `docs/aw1s/prompts/inteligencia.md`, copiado
+  literal en `inteligencia/prompt.py` -mantener los dos sincronizados a
+  mano). El cliente de Ollama esta validado solo contra mocks del
+  contrato HTTP, no contra un Ollama real (bloqueado el acceso a
+  ollama.com en el entorno donde se escribio) -si hay acceso a internet
+  disponible, correrlo contra un Ollama real es el siguiente paso
+  pendiente antes de confiar del todo en `cliente_llm.py`.
 
 Puntos que Copilot tiene que respetar si se empieza a implementar algo de
 esto:

@@ -69,6 +69,12 @@ procesamiento principal. Clasifica el problema y determina que informacion
 hace falta para resolverlo. Ademas, recopila y persiste los datos del
 usuario/interaccion en la base de datos — ver "Persistencia" mas abajo.
 
+**Implementado**: `aw1s/src/aw1s/inteligencia/` — `analizar()` hace la
+persistencia y llama a un `ClienteLLM` (protocolo) con el prompt de
+`docs/aw1s/prompts/inteligencia.md`. Logica de orquestacion y parseo
+probadas; el cliente de Ollama en si validado solo contra mocks del
+contrato HTTP, no contra un Ollama real todavia (ver `aw1s/README.md`).
+
 **Entrada**:
 - Mensaje/input del usuario
 - Contexto disponible en el momento
