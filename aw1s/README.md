@@ -17,19 +17,35 @@ python3 -m venv .venv
 
 Los tests corren sin Postgres ni Ollama reales (todo con Fakes, ver
 `tests/fakes.py`). Para probar `almacenamiento/postgres.py` contra una base
-real:
+real (sin Docker -alcanza con el paquete de Postgres del sistema):
 
 ```bash
-docker run --rm -e POSTGRES_PASSWORD=aw1s -e POSTGRES_DB=aw1s \
-    -p 5433:5432 pgvector/pgvector:pg16
-DATABASE_URL=postgresql://postgres:aw1s@127.0.0.1:5433/aw1s \
+sudo apt-get install -y postgresql-16-pgvector
+sudo service postgresql start
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'aw1s';"
+sudo -u postgres createdb aw1s
+DATABASE_URL=postgresql://postgres:aw1s@127.0.0.1:5432/aw1s \
     .venv/bin/python -m scripts.verificar_schema
 ```
 
-**Esto no se corrio todavia** (el entorno donde se escribio no tenia
-Docker/Postgres disponibles) — es el paso pendiente antes de confiar en
-`almacenamiento/postgres.py`. `atajo_semantico/` en cambio si esta
-verificado (12 tests contra la logica real, sin necesitar Postgres).
+**Ya se corrio y quedo verificado** (3 veces seguidas sobre la misma base,
+para confirmar que es repetible). Aparecieron y se arreglaron dos bugs
+reales que la version anterior (nunca probada) tenia:
+
+1. `RepositorioPostgres.crear()` intentaba registrar el tipo `vector` en
+   cada conexion nueva, pero en una base recien creada esa extension
+   todavia no existe -se creaba recien al cargar el schema. Se separo en
+   dos pasos obligatorios: `asegurar_schema()` primero (DDL puro, no
+   necesita el tipo `vector`), `crear()` despues.
+2. La limpieza del script de verificacion solo borraba la fila de
+   `usuarios`, pero `sesiones.usuario_id` y `eventos.interaccion_id` son
+   `ON DELETE SET NULL` a proposito (no perder historial si se borra un
+   usuario) -asi que quedaban sesiones/memorias/embeddings huerfanos.
+   Corriendo el script dos veces seguidas, dos memorias con el mismo
+   vector de prueba quedaban empatadas en similitud y
+   `buscar_memorias_similares` podia devolver la vieja en vez de la
+   nueva. Arreglado borrando explicitamente evento + sesion + usuario
+   (la sesion cascadea el resto).
 
 ## Que hay implementado
 

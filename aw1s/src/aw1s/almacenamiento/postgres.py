@@ -1,12 +1,16 @@
 """Implementacion de RepositorioAlmacenamiento sobre Postgres + pgvector.
 
-ADVERTENCIA: este archivo no se pudo probar contra un Postgres real en el
-entorno donde se escribio (sin Docker/Postgres disponibles). La logica de
-orquestacion (aw1s.atajo_semantico, y lo que se construya despues sobre
-este protocolo) se prueba con RepositorioEnMemoria (tests/fakes.py) sin
-tocar este archivo. Antes de usarlo en serio, correr
-``python -m aw1s.scripts.verificar_schema`` contra un Postgres+pgvector
-real (ver README) para confirmar que el SQL de aca es correcto.
+Verificado contra un Postgres+pgvector real (ver
+``scripts/verificar_schema.py`` y el historial de este archivo -la primera
+version se escribio sin poder probarla, esto ya paso esa prueba).
+
+Orden de arranque obligatorio en una base nueva: primero
+``asegurar_schema()`` (funcion de modulo, conexion sin el tipo ``vector``
+registrado -no hace falta para DDL), y recien despues ``crear()`` (que arma
+el pool con el tipo ``vector`` registrado en cada conexion). Invertir el
+orden falla: no se puede registrar un tipo de Postgres que la extension
+todavia no creo -era exactamente el primer bug real que aparecio al probar
+esto contra una base de verdad.
 """
 
 from __future__ import annotations
@@ -22,12 +26,28 @@ from .modelos import Contexto, Embedding, Evento, Interaccion, Memoria, Sesion, 
 SCHEMA_SQL = Path(__file__).parent.parent / "db" / "schema.sql"
 
 
+async def asegurar_schema(database_url: str) -> None:
+    """Crea la extension pgvector y las tablas si no existen. Conexion
+    aparte del pool (no del tipo `RepositorioPostgres`) a proposito: es DDL
+    puro, no necesita el codec de `vector` registrado, y correrlo antes de
+    que la extension exista es precisamente lo que rompe si se hace desde
+    una conexion que ya intenta registrar ese tipo."""
+    conn = await asyncpg.connect(database_url)
+    try:
+        await conn.execute(SCHEMA_SQL.read_text())
+    finally:
+        await conn.close()
+
+
 class RepositorioPostgres:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
     @classmethod
     async def crear(cls, database_url: str) -> RepositorioPostgres:
+        """Requiere que la extension pgvector ya exista -llamar
+        ``asegurar_schema()`` antes, al menos una vez, en una base nueva."""
+
         async def _inicializar_conexion(conn: asyncpg.Connection) -> None:
             await register_vector(conn)
 
@@ -36,11 +56,6 @@ class RepositorioPostgres:
 
     async def cerrar(self) -> None:
         await self._pool.close()
-
-    async def cargar_schema(self) -> None:
-        """Ejecuta db/schema.sql entero como un solo script (protocolo
-        simple de asyncpg: sin parametros, admite multiples sentencias)."""
-        await self._pool.execute(SCHEMA_SQL.read_text())
 
     # -- usuarios / sesiones --------------------------------------------------
 

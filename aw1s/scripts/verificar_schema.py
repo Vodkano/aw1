@@ -1,13 +1,19 @@
 """Smoke-test manual contra un Postgres+pgvector real.
 
-Este archivo NO se corrio en el entorno donde se escribio (sin Docker/
-Postgres disponibles ahi) -- correrlo es el paso pendiente antes de confiar
-en almacenamiento/postgres.py. Uso:
+Verificado en local (Postgres 16 + postgresql-16-pgvector, sin Docker --
+alcanza con tener el paquete de pgvector instalado para el motor de
+Postgres que uses). Uso:
 
-    docker run --rm -e POSTGRES_PASSWORD=aw1s -e POSTGRES_DB=aw1s \
-        -p 5433:5432 pgvector/pgvector:pg16
-    DATABASE_URL=postgresql://postgres:aw1s@127.0.0.1:5433/aw1s \
+    sudo apt-get install -y postgresql-16-pgvector
+    sudo service postgresql start
+    sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'aw1s';"
+    sudo -u postgres createdb aw1s
+    DATABASE_URL=postgresql://postgres:aw1s@127.0.0.1:5432/aw1s \
         .venv/bin/python -m scripts.verificar_schema
+
+(O con Docker, si lo tenes: ``docker run --rm -e POSTGRES_PASSWORD=aw1s -e
+POSTGRES_DB=aw1s -p 5433:5432 pgvector/pgvector:pg16`` y ajustar el puerto
+en DATABASE_URL.)
 
 Carga el schema, hace un ciclo completo (usuario -> sesion -> interaccion
 -> contexto -> memoria -> embedding -> evento), lee todo de vuelta, prueba
@@ -22,7 +28,7 @@ import asyncio
 import os
 import sys
 
-from aw1s.almacenamiento.postgres import RepositorioPostgres
+from aw1s.almacenamiento.postgres import RepositorioPostgres, asegurar_schema
 
 
 async def main() -> None:
@@ -31,11 +37,11 @@ async def main() -> None:
         print("Falta DATABASE_URL. Ver el docstring de este archivo.", file=sys.stderr)
         sys.exit(1)
 
+    print("Cargando schema...")
+    await asegurar_schema(database_url)
+
     repo = await RepositorioPostgres.crear(database_url)
     try:
-        print("Cargando schema...")
-        await repo.cargar_schema()
-
         print("Usuario + sesion + interaccion...")
         usuario = await repo.obtener_o_crear_usuario("verificacion:1")
         usuario_repetido = await repo.obtener_o_crear_usuario("verificacion:1")
@@ -50,7 +56,7 @@ async def main() -> None:
 
         print("Contexto + evento...")
         await repo.guardar_contexto(interaccion.id, {"nota": "contexto de prueba"})
-        await repo.registrar_evento("verificacion", {"ok": True}, interaccion.id)
+        evento = await repo.registrar_evento("verificacion", {"ok": True}, interaccion.id)
 
         print("Memoria + embedding + busqueda por similitud...")
         memoria = await repo.guardar_memoria(interaccion.id, "contenido de prueba")
@@ -61,7 +67,17 @@ async def main() -> None:
         assert resultados[0][1] > 0.99, f"score inesperado: {resultados[0][1]}"
 
         print("Limpiando filas de prueba...")
+        # sesiones.usuario_id y eventos.interaccion_id son ON DELETE SET NULL
+        # a proposito (no se quiere perder historial si se borra un usuario) --
+        # eso significa que borrar solo la fila de usuarios NO arrastra el
+        # resto: hay que borrar sesion y evento explicitamente. Bug real que
+        # aparecio al correr este script dos veces seguidas: quedaban
+        # memorias/embeddings huerfanos con el mismo vector de prueba, y
+        # buscar_memorias_similares (empate exacto de distancia, sin
+        # desempate) podia devolver la fila vieja en vez de la nueva.
         async with repo._pool.acquire() as conn:  # noqa: SLF001 -- limpieza puntual del script
+            await conn.execute("DELETE FROM eventos WHERE id = $1", evento.id)
+            await conn.execute("DELETE FROM sesiones WHERE id = $1", sesion.id)
             await conn.execute("DELETE FROM usuarios WHERE id = $1", usuario.id)
 
         print("Todo OK.")

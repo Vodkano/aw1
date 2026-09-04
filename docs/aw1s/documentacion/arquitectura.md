@@ -185,8 +185,9 @@ sistema en produccion con su propio ciclo de cambios.
 **Implementado**: `aw1s/src/aw1s/db/schema.sql` baja este modelo a tablas
 Postgres+pgvector reales, y `aw1s/src/aw1s/almacenamiento/` es la capa de
 persistencia sobre ese schema (protocolo `RepositorioAlmacenamiento` +
-implementacion `RepositorioPostgres`). Sin probar todavia contra un
-Postgres real, ver `aw1s/README.md`.
+implementacion `RepositorioPostgres`). Verificado contra un Postgres+pgvector
+real, con dos bugs reales encontrados y arreglados en el proceso -ver
+`aw1s/README.md`.
 
 ## 4. Flujo de una interaccion
 
