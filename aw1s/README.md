@@ -167,24 +167,51 @@ reales que la version anterior (nunca probada) tenia:
     para las rondas intermedias). Ver historial de commits para el
     detalle de cada uno.
   - `modelos.py` — `ResultadoEntidad`.
-
-Nada de esto esta conectado a un servidor HTTP todavia — son funciones
-puras + clientes de Ollama/Postgres, pensadas para poder probarse y usarse
-desde cualquier lado.
+- `src/aw1s/servidor/` — sirve `procesar_mensaje()` por HTTP (FastAPI +
+  uvicorn). `python -m aw1s` lo levanta (variables de entorno:
+  `AW1S_DATABASE_URL` obligatoria, `AW1S_OLLAMA_URL`/`AW1S_MODELO_CHAT`/
+  `AW1S_MODELO_EMBEDDINGS`/`AW1S_HOST`/`AW1S_PORT` opcionales, ver
+  `servidor/configuracion.py`). Un solo endpoint, `POST /api/mensaje`
+  (`servidor/esquemas.py` para el contrato exacto) mas `GET /healthz`.
+  Sin autenticacion todavia -pensado para localhost/red interna, no para
+  exponerse a internet (ver "Que falta" abajo). **Verificado con el
+  servidor real corriendo contra Postgres real**: arranca, `/healthz`
+  responde, y `/api/mensaje` devuelve 502 de forma prolija (no un 500 sin
+  manejar) cuando Ollama no esta disponible -no se probo el ciclo
+  generativo completo en vivo por la misma razon que `llm/ollama.py` (sin
+  Ollama en el entorno donde se escribio esto). Los tests de
+  `tests/test_servidor.py` no tocan Postgres/Ollama: le pasan a
+  `create_app()` un `Dependencias` armado con los mismos Fakes que ya usa
+  `test_entidad.py`, para probar el ruteo/validacion/manejo de errores
+  HTTP sin duplicar la cobertura de la Entidad en si.
+  - `configuracion.py` — `Configuracion`, todo por variable de entorno.
+  - `dependencias.py` — `Dependencias`: arma (`crear()`) y cierra
+    (`cerrar()`) Postgres+Ollama reales en un solo lugar, tipado por
+    protocolo (no por la implementacion concreta) para que se pueda
+    reemplazar por Fakes en los tests del servidor.
+  - `esquemas.py` — `MensajeEntrada`/`MensajeSalida`, el contrato Pydantic
+    HTTP (separado a proposito de `entidad/modelos.py`, que es el
+    contrato interno entre componentes).
+  - `app.py` — `create_app()`: arma la app FastAPI, el lifespan que abre/
+    cierra `Dependencias`, y los manejadores de error
+    (`ClienteLLMError`/`ProveedorEmbeddingsError`/`DecisionInvalidaError`
+    → 502, `ValueError` -ej. `sesion_id` inexistente- → 400).
 
 ## Que falta (siguientes pasos, en orden sugerido)
 
-1. **Probar `llm/ollama.py` contra un Ollama real** en cuanto haya un
-   entorno con acceso a internet para instalarlo -es lo unico de lo ya
-   escrito que sigue sin verificacion en vivo (la logica de
-   parseo/orquestacion si esta probada, contra mocks del contrato HTTP
-   y contra `RepositorioEnMemoria`).
+1. **Probar `llm/ollama.py` (y ahora tambien el servidor entero) contra un
+   Ollama real** en cuanto haya un entorno con acceso a internet para
+   instalarlo -es lo unico de lo ya escrito que sigue sin verificacion en
+   vivo (la logica de parseo/orquestacion/ruteo HTTP si esta probada,
+   contra mocks del contrato HTTP y contra Fakes).
 2. El componente Memoria en si: decidir que interaccion se conserva como
    memoria semantica y generar su embedding -sigue sin regla definida
    (ver punto pendiente en `documentacion/arquitectura.md#8`). Recien ahi
    el orquestador queda completo de punta a punta.
-3. Exponerlo como algo llamable de verdad (HTTP, o directo desde un bot
-   de Telegram) -hoy `procesar_mensaje()` es una funcion Python que hay
-   que invocar a mano, no hay servidor.
-4. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
-   documentacion) con datos reales de por medio, no en abstracto.
+3. El servidor no tiene autenticacion -aceptable mientras corre en
+   localhost/red interna, pero si se expone junto con AW1 v3 hace falta
+   revisar esto (probablemente reusar `backend/src/aw1/api/security.py`
+   en vez de inventar un esquema nuevo).
+4. Recien con el servidor probado en vivo: decidir la relacion con AW1 v3
+   (punto pendiente #4 de la documentacion) con datos reales de por
+   medio, no en abstracto.

@@ -2,8 +2,9 @@
 
 Version: 0.1.0.1-SK (primer documento fuente procesado). Estado: los 5
 componentes de procesamiento/generacion tienen codigo real y
-encadenado (`aw1s/src/aw1s/entidad/procesar_mensaje()`), falta el
-componente Memoria (ver seccion 8) y decidir la relacion con AW1 v3.
+encadenado (`aw1s/src/aw1s/entidad/procesar_mensaje()`), servido por HTTP
+(`aw1s/src/aw1s/servidor/`, ver seccion 4). Falta el componente Memoria
+(ver seccion 8) y decidir la relacion con AW1 v3.
 Fuente: spec entregada por el usuario, ver
 `docs/aw1s/planos/0.1.0.1-SK.md` para el analisis linea a linea y los
 puntos que la spec deja abiertos.
@@ -255,6 +256,20 @@ dejan rastro en la base, mismo criterio que distingue "recupera" de
 "construye el contexto final" en el diagrama de arriba. Verificado contra
 Postgres real (una interaccion + un contexto por ciclo, sin importar
 cuantas rondas de reevaluacion hicieron falta).
+
+**Implementado (servidor HTTP)**: `aw1s/src/aw1s/servidor/` expone
+`procesar_mensaje()` como `POST /api/mensaje` (FastAPI + uvicorn, `python -m
+aw1s`). No le agrega logica a la Entidad, solo la conecta a Postgres/Ollama
+reales y valida la entrada. Sin autenticacion todavia -pensado para
+localhost/red interna, no para exponerse directo a internet (ver punto
+pendiente #4: si esto termina desplegado junto a AW1 v3, probablemente
+convenga reusar el esquema de auth de `backend/src/aw1/api/security.py` en
+vez de inventar uno nuevo). Verificado con el servidor real corriendo contra
+Postgres real (arranque, `/healthz`, y `/api/mensaje` devolviendo 502 de
+forma prolija cuando Ollama no esta disponible, en vez de un error sin
+manejar) -no se pudo probar el ciclo generativo completo en vivo por la
+misma razon que `llm/ollama.py` (sin acceso a Ollama en el entorno donde se
+escribio, ver seccion 8/README).
 
 ## 5. Principio de diseno
 

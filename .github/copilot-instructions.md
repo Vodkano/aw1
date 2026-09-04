@@ -131,6 +131,16 @@ implementado, que sigue, como correr sus tests (`.venv` propio, no el de
   interaccion persistida (bug real que ya paso una vez). Mismo cuidado
   con `contexto.construir_contexto(persistir=False)` en rondas
   intermedias, `persistir=True` (default) solo en la ronda final.
+- **Servidor HTTP** (`aw1s/src/aw1s/servidor/`) — `python -m aw1s` sirve
+  `procesar_mensaje()` como `POST /api/mensaje` (FastAPI). Sin
+  autenticacion todavia -a proposito, pensado para localhost/red interna.
+  `servidor/dependencias.py` tipa `Dependencias` por protocolo (no por
+  `RepositorioPostgres`/`OllamaChatClient` concretos) para que
+  `tests/test_servidor.py` pueda armar la app con los mismos Fakes que
+  `test_entidad.py` en vez de necesitar Postgres/Ollama reales solo para
+  probar el ruteo HTTP -si se agrega un endpoint nuevo, seguir ese mismo
+  patron de inyeccion (`Depends` sobre `app.state.dependencias`), no
+  instanciar Postgres/Ollama directo adentro de una ruta.
 
 Puntos que Copilot tiene que respetar si se empieza a implementar algo de
 esto:
