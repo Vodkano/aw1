@@ -24,4 +24,8 @@ class ResultadoBusqueda:
 @dataclass(frozen=True)
 class ContextoArmado:
     resultados: list[ResultadoBusqueda]
-    contexto_id: int
+    """None cuando esta vuelta no se persistio (``persistir=False`` en
+    construir_contexto -- rondas intermedias del ciclo de Inteligencia,
+    ver aw1s/src/aw1s/entidad/). Solo la ronda final, la que Inteligencia
+    ya dio por buena, genera una fila real en la tabla `contextos`."""
+    contexto_id: int | None

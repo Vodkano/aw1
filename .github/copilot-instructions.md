@@ -113,10 +113,18 @@ implementado, que sigue, como correr sus tests (`.venv` propio, no el de
   Stateless, mismo patron que Procesamiento principal. Prompt ya escrito
   en `docs/aw1s/prompts/humanizacion.md` (este si formaba parte de la
   spec original).
-
-Falta encadenar estos componentes en un solo orquestador (hoy son piezas
-sueltas, cada una con sus propios tests) -no asumir que ya existe un
-"main loop" en algun lado de `aw1s/` hasta que se implemente.
+- **Entidad / orquestador** (`aw1s/src/aw1s/entidad/`) — `procesar_mensaje()`
+  encadena los 5 componentes de arriba (Atajo semantico → Inteligencia →
+  ciclo Contexto/reevaluar → Procesamiento principal → Humanizacion).
+  **No incluye Memoria** -sin regla definida, ver
+  `documentacion/arquitectura.md#8`. **Verificado contra Postgres real**
+  (un ciclo de N rondas deja 1 interaccion y 1 contexto, no uno por
+  ronda). Si se toca esto: `inteligencia.reevaluar()` (no
+  `inteligencia.analizar()`) es la funcion correcta para las rondas
+  intermedias del ciclo -usar `analizar()` de nuevo ahi duplicaria la
+  interaccion persistida (bug real que ya paso una vez). Mismo cuidado
+  con `contexto.construir_contexto(persistir=False)` en rondas
+  intermedias, `persistir=True` (default) solo en la ronda final.
 
 Puntos que Copilot tiene que respetar si se empieza a implementar algo de
 esto:

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from aw1s.inteligencia import DecisionInvalidaError, analizar
+from aw1s.inteligencia import DecisionInvalidaError, analizar, reevaluar
 from tests.fakes import FakeClienteLLM, RepositorioEnMemoria
 
 DECISION_TRIVIAL = {
@@ -118,3 +118,47 @@ async def test_sesion_inexistente_lanza_value_error() -> None:
 
     with pytest.raises(ValueError):
         await analizar("hola", cliente=cliente, repositorio=repo, sesion_id=999)
+
+
+async def test_reevaluar_no_crea_una_interaccion_nueva() -> None:
+    """Bug real encontrado al armar el orquestador: antes, cada vuelta del
+    ciclo de Inteligencia creaba otra fila de Interaccion para el mismo
+    mensaje del usuario. reevaluar() no debe persistir nada."""
+    repo = RepositorioEnMemoria()
+    cliente = FakeClienteLLM(DECISION_CON_NECESIDAD)
+
+    primera = await analizar(
+        "cuanto sale", cliente=cliente, repositorio=repo, identificador_externo="tg:5"
+    )
+    await reevaluar(
+        "cuanto sale",
+        cliente=cliente,
+        repositorio=repo,
+        sesion_id=primera.sesion_id,
+        interaccion_id=primera.interaccion_id,
+        contexto_recuperado={"algo": "encontrado"},
+    )
+
+    interacciones = await repo.interacciones_recientes(primera.sesion_id)
+    assert len(interacciones) == 1
+
+
+async def test_reevaluar_manda_el_contexto_recuperado_al_modelo() -> None:
+    repo = RepositorioEnMemoria()
+    cliente = FakeClienteLLM([DECISION_CON_NECESIDAD, DECISION_TRIVIAL])
+
+    primera = await analizar(
+        "cuanto sale", cliente=cliente, repositorio=repo, identificador_externo="tg:6"
+    )
+    decision = await reevaluar(
+        "cuanto sale",
+        cliente=cliente,
+        repositorio=repo,
+        sesion_id=primera.sesion_id,
+        interaccion_id=primera.interaccion_id,
+        contexto_recuperado={"precio": 1000},
+    )
+
+    entrada_segunda_llamada = json.loads(cliente.llamadas[1]["mensaje"])
+    assert entrada_segunda_llamada["contexto_recuperado"] == {"precio": 1000}
+    assert decision.listo_para_procesar is True

@@ -13,6 +13,16 @@ Si el LLM devuelve algo con forma invalida, la interaccion ya quedo
 persistida igual (no se pierde el dato crudo por un fallo de clasificacion)
 y se propaga ``DecisionInvalidaError`` para que el llamador decida como
 seguir.
+
+``analizar()`` hace las dos cosas -- se llama UNA vez por mensaje entrante,
+al principio del ciclo. Cuando Inteligencia pide otra vuelta
+(``listo_para_procesar=False``, ver docs/aw1s/prompts/inteligencia.md), el
+orquestador llama a ``reevaluar()`` en cambio: mismo LLM, mismo historial,
+pero sin volver a persistir una interaccion nueva -sigue siendo el mismo
+mensaje del usuario, no uno nuevo. Bug real encontrado al escribir el
+orquestador (aw1s/src/aw1s/entidad/): antes de esta separacion, cada
+vuelta del ciclo creaba una fila de Interaccion distinta para el mismo
+mensaje.
 """
 
 from __future__ import annotations
@@ -71,15 +81,69 @@ async def analizar(
     interaccion = await repositorio.crear_interaccion(sesion.id, mensaje_usuario, metadata, ip)
     await repositorio.registrar_evento("interaccion_recibida", {}, interaccion.id)
 
-    historial_previo = await repositorio.interacciones_recientes(
-        sesion.id, limite=LIMITE_HISTORIAL_BREVE + 1
+    historial_breve = await _historial_breve(repositorio, sesion.id, excluir=interaccion.id)
+    decision = await _pedir_decision(
+        cliente,
+        mensaje_usuario=mensaje_usuario,
+        metadata=metadata,
+        historial_breve=historial_breve,
+        contexto_recuperado=contexto_recuperado,
     )
-    historial_breve = [
+
+    return ResultadoAnalisis(
+        decision=decision,
+        interaccion_id=interaccion.id,
+        sesion_id=sesion.id,
+        usuario_id=usuario_id,
+    )
+
+
+async def reevaluar(
+    mensaje_usuario: str,
+    *,
+    cliente: ClienteLLM,
+    repositorio: RepositorioAlmacenamiento,
+    sesion_id: int,
+    interaccion_id: int,
+    contexto_recuperado: dict,
+    metadata: dict | None = None,
+) -> DecisionInteligencia:
+    """Otra vuelta del mismo ciclo -- NO persiste una interaccion nueva
+    (ya se persistio en el ``analizar()`` que empezo este ciclo). Usar
+    solo cuando la vuelta anterior de Inteligencia devolvio
+    ``listo_para_procesar=False``."""
+    metadata = dict(metadata or {})
+    historial_breve = await _historial_breve(repositorio, sesion_id, excluir=interaccion_id)
+    return await _pedir_decision(
+        cliente,
+        mensaje_usuario=mensaje_usuario,
+        metadata=metadata,
+        historial_breve=historial_breve,
+        contexto_recuperado=contexto_recuperado,
+    )
+
+
+async def _historial_breve(
+    repositorio: RepositorioAlmacenamiento, sesion_id: int, *, excluir: int
+) -> list[dict]:
+    historial_previo = await repositorio.interacciones_recientes(
+        sesion_id, limite=LIMITE_HISTORIAL_BREVE + 1
+    )
+    return [
         {"mensaje": i.mensaje_usuario, "creada_en": i.creada_en.isoformat()}
         for i in historial_previo
-        if i.id != interaccion.id
+        if i.id != excluir
     ][:LIMITE_HISTORIAL_BREVE]
 
+
+async def _pedir_decision(
+    cliente: ClienteLLM,
+    *,
+    mensaje_usuario: str,
+    metadata: dict,
+    historial_breve: list[dict],
+    contexto_recuperado: dict | None,
+) -> DecisionInteligencia:
     entrada = {
         "mensaje_usuario": mensaje_usuario,
         "metadata": metadata,
@@ -89,14 +153,7 @@ async def analizar(
     payload = await cliente.generar_json(
         system=SYSTEM_PROMPT, mensaje=json.dumps(entrada, ensure_ascii=False)
     )
-    decision = _parsear_decision(payload)
-
-    return ResultadoAnalisis(
-        decision=decision,
-        interaccion_id=interaccion.id,
-        sesion_id=sesion.id,
-        usuario_id=usuario_id,
-    )
+    return _parsear_decision(payload)
 
 
 def _parsear_decision(payload: dict) -> DecisionInteligencia:

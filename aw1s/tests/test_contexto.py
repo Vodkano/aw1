@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aw1s.contexto import construir_contexto
+from aw1s.contexto import construir_contexto, contexto_a_dict
 from aw1s.inteligencia.modelos import Necesidad
 from tests.fakes import FakeEmbeddings, RepositorioEnMemoria, vector_con_similitud
 
@@ -188,3 +188,42 @@ async def test_similitud_baja_se_ordena_pero_no_se_descarta() -> None:
     )
 
     assert len(contexto.resultados[0].memorias) == 1
+
+
+async def test_persistir_false_no_guarda_fila_en_contextos() -> None:
+    """Rondas intermedias del ciclo de Inteligencia -- ver docstring de
+    construir_contexto(). Solo la ronda final debe dejar una fila real."""
+    repo = RepositorioEnMemoria()
+    sesion_id, interaccion_id = await _preparar_sesion_con_historial(repo)
+    necesidad = _necesidad(fuente="postgres", usa_historial_sesion=True)
+
+    contexto = await construir_contexto(
+        [necesidad],
+        sesion_id=sesion_id,
+        interaccion_id=interaccion_id,
+        repositorio=repo,
+        embeddings=FakeEmbeddings(),
+        persistir=False,
+    )
+
+    assert contexto.contexto_id is None
+    assert len(contexto.resultados[0].interacciones) == 2  # igual se ejecuta la busqueda
+    assert repo._contextos == {}  # noqa: SLF001 -- nada quedo guardado
+
+
+async def test_contexto_a_dict_funciona_sin_persistir() -> None:
+    repo = RepositorioEnMemoria()
+    sesion_id, interaccion_id = await _preparar_sesion_con_historial(repo)
+    necesidad = _necesidad(fuente="postgres", usa_historial_sesion=True)
+
+    contexto = await construir_contexto(
+        [necesidad],
+        sesion_id=sesion_id,
+        interaccion_id=interaccion_id,
+        repositorio=repo,
+        embeddings=FakeEmbeddings(),
+        persistir=False,
+    )
+
+    contenido = contexto_a_dict(contexto)
+    assert len(contenido["resultados"][0]["interacciones"]) == 2

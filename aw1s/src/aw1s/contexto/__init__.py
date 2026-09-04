@@ -1,4 +1,4 @@
-from .contexto import construir_contexto
+from .contexto import construir_contexto, contexto_a_dict
 from .modelos import ContextoArmado, ResultadoBusqueda
 
-__all__ = ["construir_contexto", "ContextoArmado", "ResultadoBusqueda"]
+__all__ = ["construir_contexto", "contexto_a_dict", "ContextoArmado", "ResultadoBusqueda"]

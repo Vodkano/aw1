@@ -26,7 +26,16 @@ async def construir_contexto(
     interaccion_id: int,
     repositorio: RepositorioAlmacenamiento,
     embeddings: EmbeddingsProvider,
+    persistir: bool = True,
 ) -> ContextoArmado:
+    """``persistir=False``: no guarda fila en `contextos` -- para las
+    rondas intermedias del ciclo de Inteligencia (el flujo original
+    distingue "Contexto: recupera" de "Contexto: construye el contexto
+    final", ver docs/aw1s/documentacion/arquitectura.md#4; solo la ronda
+    final corresponde a esa segunda accion). Bug real encontrado al armar
+    el orquestador: antes, cada ronda intermedia dejaba una fila de
+    `contextos` para la misma interaccion, rompiendo la relacion 1-a-1
+    que describe el modelo de datos (arquitectura.md#3)."""
     resultados = [
         await _ejecutar_necesidad(
             necesidad, sesion_id=sesion_id, repositorio=repositorio, embeddings=embeddings
@@ -34,9 +43,12 @@ async def construir_contexto(
         for necesidad in necesidades
     ]
 
-    contexto = await repositorio.guardar_contexto(interaccion_id, _serializar(resultados))
+    contexto_id = None
+    if persistir:
+        contexto = await repositorio.guardar_contexto(interaccion_id, _serializar(resultados))
+        contexto_id = contexto.id
 
-    return ContextoArmado(resultados=resultados, contexto_id=contexto.id)
+    return ContextoArmado(resultados=resultados, contexto_id=contexto_id)
 
 
 async def _ejecutar_necesidad(
@@ -64,6 +76,14 @@ async def _ejecutar_necesidad(
         )
 
     return ResultadoBusqueda(necesidad=necesidad, interacciones=interacciones, memorias=memorias)
+
+
+def contexto_a_dict(contexto: ContextoArmado) -> dict:
+    """Version dict de un ContextoArmado ya construido -- para pasarlo
+    como ``contexto_recuperado`` a ``inteligencia.reevaluar()`` sin
+    depender de que se haya persistido (funciona igual con
+    ``persistir=False``)."""
+    return _serializar(contexto.resultados)
 
 
 def _serializar(resultados: list[ResultadoBusqueda]) -> dict:

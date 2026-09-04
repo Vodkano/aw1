@@ -140,6 +140,25 @@ reales que la version anterior (nunca probada) tenia:
     consulta original + historial breve opcional + canal opcional
     (chat web, Telegram, etc. -por si cambia el formato esperado).
   - `modelos.py` — `ResultadoHumanizacion`.
+- `src/aw1s/entidad/` — el orquestador: encadena los 5 componentes de
+  arriba en el orden que describe
+  `docs/aw1s/documentacion/arquitectura.md#4`.
+  - `entidad.py` — `procesar_mensaje()`: Atajo semantico (corto-circuito
+    sin LLM si hay match) → Inteligencia → ciclo Contexto/reevaluar → 
+    Procesamiento principal → Humanizacion. **No incluye Memoria** -sin
+    regla definida todavia de que se conserva como memoria semantica, ver
+    "Que falta" abajo. Dos decisiones propias documentadas en el
+    docstring del archivo: `sesion_activa` para el Atajo se aproxima
+    como "se paso un `sesion_id`", y `limite_iteraciones` (tope duro del
+    ciclo, la spec pide uno pero no da numero) por defecto es 3.
+  - **Verificado contra Postgres real**: un ciclo de 2 rondas deja
+    exactamente 1 interaccion y 1 fila de contexto (no una por ronda) —
+    dos bugs reales que aparecieron recien al armar este orquestador y ya
+    estan arreglados (`inteligencia.reevaluar()` no persiste una
+    interaccion nueva; `contexto.construir_contexto(persistir=False)`
+    para las rondas intermedias). Ver historial de commits para el
+    detalle de cada uno.
+  - `modelos.py` — `ResultadoEntidad`.
 
 Nada de esto esta conectado a un servidor HTTP todavia — son funciones
 puras + clientes de Ollama/Postgres, pensadas para poder probarse y usarse
@@ -155,14 +174,12 @@ desde cualquier lado.
 2. Backend real del indice del Atajo semantico sobre Postgres (implementar
    `IndiceFrasesConocidas` con una tabla, en vez de `IndiceEnMemoria`) —
    ya existe la infraestructura de Postgres+pgvector, es un paso chico.
-3. El ciclo completo: encadenar Atajo semantico → Inteligencia → Contexto
-   → Procesamiento principal → Humanizacion → Memoria en un solo
-   orquestador. Si `listo_para_procesar` es `false`, volver a llamar a
-   Inteligencia con `contexto_recuperado` (el `ContextoArmado` que ya
-   arma Contexto) -el limite de iteraciones para evitar un loop infinito
-   sigue sin definir (ver nota en `docs/aw1s/prompts/inteligencia.md`).
-4. El componente Memoria en si: decidir que interaccion se conserva como
+3. El componente Memoria en si: decidir que interaccion se conserva como
    memoria semantica y generar su embedding -sigue sin regla definida
-   (ver punto pendiente en `documentacion/arquitectura.md#8`).
+   (ver punto pendiente en `documentacion/arquitectura.md#8`). Recien ahi
+   el orquestador queda completo de punta a punta.
+4. Exponerlo como algo llamable de verdad (HTTP, o directo desde un bot
+   de Telegram) -hoy `procesar_mensaje()` es una funcion Python que hay
+   que invocar a mano, no hay servidor.
 5. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
    documentacion) con datos reales de por medio, no en abstracto.
