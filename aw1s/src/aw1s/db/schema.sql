@@ -69,6 +69,20 @@ CREATE TABLE IF NOT EXISTS eventos (
     ocurrido_en         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Indice curado del Atajo semantico (docs/aw1s/planos/0.1.0.2) -- NO es
+-- Memoria. Chico, mantenido a mano, no crece solo con el uso. Vive en su
+-- propia tabla (no mezclado con `memorias`/`embeddings`) porque son dos
+-- pgvector con proposito distinto, aunque vivan en la misma base.
+CREATE TABLE IF NOT EXISTS frases_conocidas (
+    id                      BIGSERIAL PRIMARY KEY,
+    frase                   TEXT NOT NULL,
+    frase_normalizada       TEXT NOT NULL UNIQUE,
+    respuesta               TEXT NOT NULL,
+    categoria               TEXT NOT NULL,
+    embedding               VECTOR(768) NOT NULL,
+    creado_en               TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_sesiones_usuario ON sesiones (usuario_id);
 CREATE INDEX IF NOT EXISTS idx_interacciones_sesion ON interacciones (sesion_id);
 CREATE INDEX IF NOT EXISTS idx_contextos_interaccion ON contextos (interaccion_id);
@@ -81,3 +95,12 @@ CREATE INDEX IF NOT EXISTS idx_eventos_interaccion ON eventos (interaccion_id);
 -- revisar el parametro "lists" y re-crear el indice.
 CREATE INDEX IF NOT EXISTS idx_embeddings_vector
     ON embeddings USING ivfflat (vector vector_cosine_ops);
+
+-- NO usar ivfflat en frases_conocidas -- bug real encontrado al probar
+-- esto contra Postgres de verdad: con pocas filas (esta tabla es chica y
+-- curada a mano a proposito, no va a crecer como `embeddings`) el indice
+-- aproximado puede devolver CERO filas para un vector fuera de la
+-- distribucion de los datos ya cargados, en vez de la fila mas cercana
+-- -confirmado comparando el mismo query con y sin el indice. Sin indice
+-- vectorial, la busqueda es secuencial (exacta, no aproximada) y a este
+-- tamano de tabla es rapida de sobra.

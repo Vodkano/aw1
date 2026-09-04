@@ -78,7 +78,13 @@ Codigo en `aw1s/` (raiz del repo, paquete Python propio, **no** dentro de
 implementado, que sigue, como correr sus tests (`.venv` propio, no el de
 `backend/`). Implementado hasta ahora:
 - **Atajo semantico** (`aw1s/src/aw1s/atajo_semantico/`) — calibracion v1
-  completa, verificada con tests.
+  completa, verificada con tests. Backend real del indice sobre Postgres
+  (`IndiceFrasesConocidasPostgres`, tabla `frases_conocidas`) ademas de
+  `IndiceEnMemoria`. Esa tabla NO lleva indice `ivfflat` -bug real
+  encontrado al probarla: con pocas filas (es chica y curada a mano a
+  proposito) un indice aproximado puede devolver cero resultados para un
+  vector fuera de la distribucion de los datos. No agregarle un indice
+  vectorial sin volver a leer el comentario en `db/schema.sql`.
 - **Schema + persistencia** (`aw1s/src/aw1s/db/schema.sql` +
   `aw1s/src/aw1s/almacenamiento/`) — Postgres+pgvector real via asyncpg,
   **ya verificado** contra una base real (`aw1s/scripts/verificar_schema.py`,

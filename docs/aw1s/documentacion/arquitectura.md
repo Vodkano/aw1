@@ -46,6 +46,16 @@ apenas uno autoriza o descarta:
    pero se loguea como casi-match para revisar el indice; <0.85 no
    autoriza.
 
+**Implementado**: `aw1s/src/aw1s/atajo_semantico/` completo, con backend
+real del indice sobre Postgres (`IndiceFrasesConocidasPostgres`, tabla
+`frases_conocidas`) ademas de la version en memoria. Verificado contra
+Postgres real — encontro y corrigio un bug real: la tabla es chica y
+curada a mano a proposito (no crece como `memorias`/`embeddings`), y un
+indice `ivfflat` (busqueda aproximada) sobre pocas filas puede devolver
+CERO resultados para un vector fuera de la distribucion de los datos
+cargados, en vez del mas cercano. `frases_conocidas` no lleva indice
+vectorial -busqueda secuencial exacta, rapida de sobra a este tamano.
+
 Ademas, con sesion activa (interaccion previa reciente sin resolver) el
 atajo no se aplica salvo que la entrada matcheada sea de categoria
 "despedida". Los valores numericos son punto de partida, se ajustan con

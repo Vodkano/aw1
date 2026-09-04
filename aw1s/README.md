@@ -61,6 +61,14 @@ reales que la version anterior (nunca probada) tenia:
   - `indice.py` — `IndiceFrasesConocidas` (protocolo) + `IndiceEnMemoria`
     (implementacion de referencia) + `indice_semilla()` con el set inicial
     de saludos/despedidas/agradecimientos en espanol.
+  - `indice_postgres.py` — `IndiceFrasesConocidasPostgres`, backend real
+    sobre la tabla `frases_conocidas` (`db/schema.sql`), mas
+    `poblar_semilla()` para cargar/actualizar `indice_semilla()` ahi.
+    **Verificado contra Postgres real** -encontro un bug real: la tabla no
+    lleva indice `ivfflat` a proposito (busqueda aproximada sobre pocas
+    filas puede devolver cero resultados en vez del mas cercano, ver
+    `db/schema.sql` para el detalle) -busqueda secuencial exacta en su
+    lugar, de sobra para el tamano de esta tabla.
   - `atajo.py` — `evaluar_atajo()`, la orquestacion de los tres pasos.
 - `src/aw1s/db/schema.sql` — el modelo de datos conceptual
   (`docs/aw1s/documentacion/arquitectura.md#3`) bajado a tablas Postgres +
@@ -171,15 +179,12 @@ desde cualquier lado.
    escrito que sigue sin verificacion en vivo (la logica de
    parseo/orquestacion si esta probada, contra mocks del contrato HTTP
    y contra `RepositorioEnMemoria`).
-2. Backend real del indice del Atajo semantico sobre Postgres (implementar
-   `IndiceFrasesConocidas` con una tabla, en vez de `IndiceEnMemoria`) —
-   ya existe la infraestructura de Postgres+pgvector, es un paso chico.
-3. El componente Memoria en si: decidir que interaccion se conserva como
+2. El componente Memoria en si: decidir que interaccion se conserva como
    memoria semantica y generar su embedding -sigue sin regla definida
    (ver punto pendiente en `documentacion/arquitectura.md#8`). Recien ahi
    el orquestador queda completo de punta a punta.
-4. Exponerlo como algo llamable de verdad (HTTP, o directo desde un bot
+3. Exponerlo como algo llamable de verdad (HTTP, o directo desde un bot
    de Telegram) -hoy `procesar_mensaje()` es una funcion Python que hay
    que invocar a mano, no hay servidor.
-5. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
+4. Recien ahi: decidir la relacion con AW1 v3 (punto pendiente #4 de la
    documentacion) con datos reales de por medio, no en abstracto.
